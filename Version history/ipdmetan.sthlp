@@ -1,10 +1,9 @@
 {smcl}
-{* *! version 3.2  David Fisher  28jan2019}{...}
-{vieweralsosee "admetan" "help admetan"}{...}
-{vieweralsosee "admetani" "help admetani"}{...}
+{* *! version 4.0  David Fisher  25nov2020}{...}
 {vieweralsosee "ipdover" "help ipdover"}{...}
 {vieweralsosee "forestplot" "help forestplot"}{...}
 {vieweralsosee "metan" "help metan"}{...}
+{vieweralsosee "metani" "help metani"}{...}
 {viewerjumpto "Syntax" "ipdmetan##syntax"}{...}
 {viewerjumpto "Description" "ipdmetan##description"}{...}
 {viewerjumpto "Options" "ipdmetan##options"}{...}
@@ -45,20 +44,18 @@ where {it:input_varlist} is one of the following:
 
 
 {pstd}
-The terms "generic" and "specific" are used here with reference to the {bf:{help admetan}} documentation,
-and differentiate between derivation of effect sizes and standard errors which could, in the inverse-variance meta-analysis context,
-be interpreted generically (although in practice, of course, the interpretation is governed by {it:command});
+The terms "generic" and "specific" are used to differentiate between derivation of effect sizes and standard errors which could,
+in the inverse-variance meta-analysis context, be interpreted generically (although in practice, of course, the interpretation is governed by {it:command});
 and the use of {bf:{help collapse}} to directly convert the IPD to an aggregate dataset with a specific data structure
 such as a 2x2 contingency table, or means and SDs by treatment arm.
-With {cmd:ipdmetan}, there is a substantial difference in syntax;
-hence in the remainder of the {cmd:ipdmetan} documentation the terms "Syntax 1" and "Syntax 2" will be used.
+There is a substantial difference in syntax; in the remainder of the {cmd:ipdmetan} documentation the terms "Syntax 1" and "Syntax 2" will be used.
 
 
 {synoptset 34 tabbed}{...}
 {synopthdr}
 {synoptline}
 {syntab :Main}
-{synopt :{it:{help admetan##options:admetan_options}}}any {bf:{help admetan}} options except {opt npts(varname)}{p_end}
+{synopt :{it:{help metan##options:options}}}any {bf:{help metan}} options, as appropriate, except {opt npts(varname)}{p_end}
 
 {syntab :Syntax 1 only}
 {synopt :{opt me:ssages}}print messages relating to success of model fits{p_end}
@@ -83,7 +80,8 @@ display (and/or save) columns of additional data{p_end}
 {synopt :{cmd:npts}}display participant numbers in the forest plot{p_end}
 {synopt :{cmd:plotid(}{it:varname}{cmd:|_BYAD} [{cmd:, {ul:l}ist {ul:nogr}aph}]{cmd:)}}
 define groups of observations in which to apply specific plot rendition options{p_end}
-{synopt :{it:{help admetan##fplotopts:admetan_fplotopts}}}other options pertaining to the forest plot as described in {bf:{help admetan}}{p_end}
+{synopt :{it:{help metan##options_main:metan_fplotopts}}}other options pertaining to the forest plot
+as described in {bf:{help metan}} under "Forest plot and/or saved data"{p_end}
 {synopt :{cmdab:forest:plot(}{help forestplot##options:{it:forestplot_options}}{cmd:)}}other options as described in {bf:{help forestplot}}{p_end}
 {synoptline}
 
@@ -148,11 +146,14 @@ In the second case (continuous outcome; binary treatment variable), the data wil
 Finally, if a binary treatment variable alone is supplied and the data is {bf:{help stset}},
 the survival data will be summarised by study using Peto logrank {it:O-E} and {it:V} statistics
 (note that this supersedes {cmd:petometan} which previously formed part of the {cmd:ipdmetan} package).
-These summaries correspond to the "specific effect measure" inputs listed in the {bf:{help admetan#syntax:admetan}} help file.
 
 {pmore}
 Note that with Syntax 2, the effect measure must be made explicit by use of an option such as {opt rr}, {opt or}, {opt hr}, {opt smd} or {opt logrank};
-see {bf:{help admetan}} and {it:{help eform_option}}.
+see {bf:{help metan}} and {it:{help eform_option}}.
+
+{pstd}
+This version of {cmd:ipdmetan} requires version 4.0+ of the package {cmd:metan} to be installed.
+This package is available from the SSC archive; type {stata ssc describe metan}.
 
 
 {marker options}{...}
@@ -222,7 +223,7 @@ allows aggregate (summary) data may be included in the analysis alongside IPD, f
 and either a standard error or lower and upper 95% confidence limits, on the linear scale.
 If {it:{help filename}} is supplied, {it:varlist} will be taken from within the external file;
 otherwise {it:varlist} will be taken from the data currently in memory.
-If confidence limits are supplied, they must be derived from a Normal distribution or the pooled result will not be accurate (see {bf:{help admetan}}).
+If confidence limits are supplied, they must be derived from a Normal distribution or the pooled result will not be accurate (see {bf:{help metan}}).
 
 {pmore}
 {opt npts(varname)} allows participant numbers stored in {it:varname} within {it:filename} to be displayed in tables and forest plots.
@@ -248,7 +249,7 @@ Note that subgroups in aggregate data may be analysed in the same way as for IPD
 {phang}
 {cmd:lcols(}{help ipdmetan##cols_info:{it:cols_info}}{cmd:)}, {cmd:rcols(}{help ipdmetan##cols_info:{it:cols_info}}{cmd:)}
 define columns of additional summary data to be presented to the left or right of the forest plot.
-With {cmd:admetan} these options simply require a {it:varlist}, but in the IPD context the syntax is more complicated.
+With {cmd:metan} these options simply require a {it:varlist}, but in the IPD context the syntax is more complicated.
 The user may specify summary statistics by which to {bf:{help collapse}} the data,
 as well as characteristics of the summarised variables such as name, title and format which will be carried over to the forest plot.
 
@@ -274,7 +275,7 @@ A single string-valued forest plot column may be left-justified as described in 
 To left-justify {ul:all} strings in the forest plot, the {help forestplot##options:{it:forestplot_option}} {opt leftjustify} has been provided.
 
 {pmore}
-(Note that the syntax of {opt lcols()} and {opt rcols()} with {bf:{help admetan}} and {bf:{help forestplot}} is as a list of existing variable names only.)
+(Note that the syntax of {opt lcols()} and {opt rcols()} with {bf:{help metan}} and {bf:{help forestplot}} is as a list of existing variable names only.)
 
 {phang}
 {cmd:npts} requests that participant numbers be displayed in a column to the left of the forest plot.
@@ -292,7 +293,7 @@ For further details of this option and the {opt list} and {opt nograph} suboptio
 {marker saved_results}{...}
 {title:Saved results}
 
-{pstd}{cmd:ipdmetan} saves the same results in {cmd:r()} as {bf:{help admetan}}, with the following additions:{p_end}
+{pstd}{cmd:ipdmetan} saves the same results in {cmd:r()} as {bf:{help metan}}, with the following additions:{p_end}
 
 {synoptset 25 tabbed}{...}
 {p2col 5 25 29 2: Macros}{p_end}
@@ -309,7 +310,7 @@ For further details of this option and the {opt list} and {opt nograph} suboptio
 {synopt:{cmd:_rsample}}Observations included in the analysis (c.f. {cmd:e(sample)}){p_end}
 
 {pstd}
-N.B. For obvious reasons, {help admetan##saved_results:new variables} {bf:_ES}, {bf:_seES} etc. are {ul:not} added to the data with {cmd:ipdmetan}.
+N.B. For obvious reasons, {help metan##saved_datasets:new variables} {bf:_ES}, {bf:_seES} etc. are {ul:not} added to the data with {cmd:ipdmetan}.
 They are instead returned within the matrix {cmd:r(coeffs)}.
 
 
@@ -328,7 +329,7 @@ Setup
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_setup1 using ipdmetan.sthlp, restnot:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_setup1 using ipdmetan.sthlp, restnot:click to run})}{p_end}
 
 
 {pstd}
@@ -353,7 +354,7 @@ box2opts(mcolor(blue)) ci2opts(lcolor(blue))){* ///}{p_end}
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_ex2 using ipdmetan.sthlp, restpres:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_ex2 using ipdmetan.sthlp, restpres:click to run})}{p_end}
 
 
 {pstd}
@@ -373,7 +374,7 @@ favours("Favours greater treatment effect" "with higher disease stage"{* ///}{..
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_ex3 using ipdmetan.sthlp, restpres:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_ex3 using ipdmetan.sthlp, restpres:click to run})}{p_end}
 
 
 {pstd}
@@ -388,7 +389,7 @@ Aggregate data setup: create aggregate dataset from IPD dataset (for example pur
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_setup2 using ipdmetan.sthlp, restpresnot:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_setup2 using ipdmetan.sthlp, restpresnot:click to run})}{p_end}
 
 
 {pstd}
@@ -403,7 +404,7 @@ Including aggregate data in the analysis
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_ex4 using ipdmetan.sthlp, restpres:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_ex4 using ipdmetan.sthlp, restpres:click to run})}{p_end}
 
 
 {pstd}
@@ -422,7 +423,7 @@ forest(nostats nowt favours(Favours treatment # Favours control)){* ///}{p_end}
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_ex5 using ipdmetan.sthlp, restpres:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_ex5 using ipdmetan.sthlp, restpres:click to run})}{p_end}
 
 
 {pstd}
@@ -432,13 +433,13 @@ The example is a Peto logrank survival analysis, which is much more straightforw
 {cmd}{...}
 {* example_start - ipdmetan_ex6}{...}
 {phang2}
-. ipdmetan trt, study(trialid) hr iv oev by(region){* ///}{p_end}
+. ipdmetan trt, study(trialid) hr oev by(region){* ///}{p_end}
 {p 16 20 2}
 forest(nostats nowt favours(Favours treatment # Favours control)){p_end}
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdmetan_ex6 using ipdmetan.sthlp, restpres:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdmetan_ex6 using ipdmetan.sthlp, restpres:click to run})}{p_end}
 
 
 

@@ -30,19 +30,40 @@
 * version 3.1  David Fisher 03dec2018
 // fixed bug in RD option
 
-*! version 3.2  David Fisher 28jan2019
+* version 3.2  David Fisher 28jan2019
 // no changes to code; upversioned to match admetan/ipdmetan
 // but a minor change to text in the help file
+
+*! version 4.0  David Fisher  25nov2020
+// no changes to code, other than adding check that -metan- v4.0+ is installed; upversioned to match metan/ipdmetan
+// some changes to text in the help file
 
 
 
 program define ipdover, rclass
 
 	version 11
-	* NOTE: mata requires v9 (??)
+	local version : di "version " string(_caller()) ":"
+	* NOTE: mata requires v9.x
 	* factor variable syntax requires 11.0
 	* but neither is vital to ipdover
 
+	// Check that -metan- v4.0+ is installed
+	cap metan
+	if "`r(metan_version)'"=="" {
+		nois disp as err "This version of {bf:ipdmetan} requires version 4.00 or higher of {bf:metan}"
+		exit 499
+	}
+	else {
+		local current_version = 4.0
+		if `r(metan_version)' < `current_version' {
+			nois disp as err "{bf:metan} version " as res `r(metan_version)' as err " may not the most recent version available"
+			nois disp as err "Please check, and consider updating {bf:metan}"
+		}
+	}
+	
+	
+	
 	// ipdmetan has two possible syntaxes:
 	
 	// "generic" effect measure / Syntax 1  ==> ipdmetan [exp_list] .... : [command] [if] [in] ...

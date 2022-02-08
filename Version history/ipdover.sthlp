@@ -1,10 +1,9 @@
 {smcl}
-{* *! version 3.2  David Fisher  28jan2019}{...}
+{* *! version 4.0  David Fisher  25nov2020}{...}
 {vieweralsosee "ipdmetan" "help ipdmetan"}{...}
 {vieweralsosee "forestplot" "help forestplot"}{...}
 {vieweralsosee "metan" "help metan"}{...}
-{vieweralsosee "admetan" "help admetan"}{...}
-{vieweralsosee "admetani" "help admetani"}{...}
+{vieweralsosee "metani" "help metani"}{...}
 {viewerjumpto "Syntax" "ipdover##syntax"}{...}
 {viewerjumpto "Description" "ipdover##description"}{...}
 {viewerjumpto "Options" "ipdover##options"}{...}
@@ -61,11 +60,15 @@ and by default sample size will appear to the left of the plot
 (instead of study weights appearing to the right of the plot as in {cmd:ipdmetan}).
 
 {pstd}
-{help admetan##saved_datasets:Saved datasets} may include the following identifier variables:{p_end}
+{help metan##saved_datasets:Saved datasets} may include the following identifier variables:{p_end}
 {p2colset 8 24 24 8}
 {p2col:{cmd:_BY}}subset of data (c.f. {help by}) as supplied to second {opt over()} option, if applicable{p_end}
 {p2col:{cmd:_OVER}}identifier of variable within {it:over_varlist}{p_end}
 {p2col:{cmd:_LEVEL}}level (category) of variable identified by {cmd:_OVER}.{p_end}
+
+{pstd}
+This version of {cmd:ipdmetan} requires version 4.0+ of the package {cmd:metan} to be installed.
+This package is available from the SSC archive; type {stata ssc describe metan}.
 
 
 {marker options}{...}
@@ -94,7 +97,7 @@ datasets created by {cmd:ipdover}:{p_end}
 {p2col:{cmd:_LEVEL}}group observations by levels of {cmd:_LEVEL}{p_end}
 {p2col:{cmd:_n}}allow each observation to be its own group.{p_end}
 
-{pstd}Most other options as described for {bf:{help ipdmetan##options:ipdmetan}}, {bf:{help admetan##options:admetan}}
+{pstd}Most other options as described for {bf:{help ipdmetan##options:ipdmetan}}, {bf:{help metan##options:metan}}
 or {bf:{help forestplot##options:forestplot}} may also be supplied to {cmd:ipdover},
 with the exception of options concerning heterogeneity statistics or pooled results
 such as {opt model()}, {opt cumulative} or {opt influence}.
@@ -149,7 +152,7 @@ forestplot(favours("Odds of LBW decrease" "as age increases" # "Odds of LBW incr
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdover_ex1 using ipdover.sthlp:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdover_ex1 using ipdover.sthlp:click to run})}{p_end}
 
 
 {pstd}
@@ -172,7 +175,7 @@ counts group1(`"Age of mothers"' `"of low BW infants"') group2(`"Age of mothers"
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdover_ex2 using ipdover.sthlp, list:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdover_ex2 using ipdover.sthlp, list:click to run})}{p_end}
 
 
 {pstd}
@@ -190,7 +193,7 @@ Therefore, we could also perform this analysis using {help vwls:variance-weighte
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdover_ex3 using ipdover.sthlp, list:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdover_ex3 using ipdover.sthlp, list:click to run})}{p_end}
 
 
 {pstd}
@@ -214,7 +217,7 @@ forestplot(favours(Favours treatment # Favours control) maxwidth(18)) : stcox tr
 {* example_end}{...}
 {txt}{...}
 {pmore}
-{it:({stata admetan_hlp_run ipdover_ex4 using ipdover.sthlp, list:click to run})}{p_end}
+{it:({stata metan_hlp_run ipdover_ex4 using ipdover.sthlp, list:click to run})}{p_end}
 
 
 

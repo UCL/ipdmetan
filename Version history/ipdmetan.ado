@@ -107,16 +107,22 @@
 //   so that admetan is completely self-contained
 
 // For future version:
-//  - allow by() AND byad??  (with the effect that studies are stratified by both "by" and "source")
 //  - see statalist post re weights with -teffects-
 
 * version 3.1  David Fisher  04dec2018
 // only pass straight to admetan_setup if one obs per study *AND* "`cmdstruc'"=="specific"
 // minor correction/clarification to options `admopts' passed to -admetan-
 
-*! version 3.2  David Fisher  28jan2019
+* version 3.2  David Fisher  28jan2019
 // GetNewname adds an extra underscore where `newname' matches _[A-Z] (and hence would o/w be caught by "badnames")
 // Fixed bugs preventing help file examples from running
+
+*! version 4.0  David Fisher  25nov2020
+// call -metan- version 4.00 rather than -admetan-
+// from now on, -metan- v4.00+ is required ... also check for latest version of -metan- and display message if update required
+// added undocumented `force' option to allow "deluded" interaction analysis (see Fisher et al BMJ 2017)
+// moved even more code out of -(ad)metan- and into here
+// fixed bug in "collapse-based syntax" with binary outcome which meant -(ad)metan- called with RR even if user specified OR
 
 
 
@@ -127,6 +133,21 @@ program define ipdmetan, rclass
 	* NOTE: mata requires v9.x
 	* factor variable syntax requires 11.0
 
+	// Check that -metan- v4.0+ is installed
+	cap metan
+	if "`r(metan_version)'"=="" {
+		nois disp as err "This version of {bf:ipdmetan} requires version 4.00 or higher of {bf:metan}"
+		exit 499
+	}
+	else {
+		local current_version = 4.0
+		if `r(metan_version)' < `current_version' {
+			nois disp as err "{bf:metan} version " as res `r(metan_version)' as err " may not the most recent version available"
+			nois disp as err "Please check, and consider updating {bf:metan}"
+		}
+	}
+	
+	
 	
 	*******************************
 	* Determine command structure *
@@ -137,7 +158,7 @@ program define ipdmetan, rclass
 	// (calculations based on an estimation model fitted within each study)
 	
 	// "specific" effect measure / Syntax 2 ==> ipdmetan varlist [if] [in] ...  **no colon**
-	// (raw event counts or means (SDs) within each study using some variation on -collapse-)
+	// (raw event counts or means (SDs) within each study using some variation on -collapse- )
 	
 	cap _on_colon_parse `0'
 	local rc = _rc
@@ -153,7 +174,7 @@ program define ipdmetan, rclass
 		STUDY(string) BY(string)  ///
 		SORTBY(string)            /// optional sorting varlist
 		IPDOVER(string)           /// options passed through from ipdover (see ipdover.ado & help file)
-		AD(string)                /// optionally incorporate aggregate-data (mainly used within admetan_setup subroutine)
+		AD(string)                /// optionally incorporate aggregate-data (mainly used within "metan_setup" subroutine)
 		FORESTplot(passthru)      /// options to pass through to forestplot
 		* ]                       // remaining options will be parsed later		
 	
@@ -236,7 +257,7 @@ program define ipdmetan, rclass
 
 	local 0 `"`invlist' `cmdifin'"'
 	syntax [varlist(numeric max=6 default=none)] [if] [in]
-	marksample touse
+	marksample touse, novarlist						// don't lose missing values yet
 		
 	// Quickly extract `study' varname from option
 	local studyopt `study'							// full option (including `missing' if supplied), for ProcessAD
@@ -266,7 +287,7 @@ program define ipdmetan, rclass
 	// Quickly extract `by' varname from option (N.B. this will be parsed properly later)
 	local byopt `by'						// full option (including `missing' if supplied), for ProcessAD
 	local 0 `by'
-	syntax [name(name=by)] [, Missing]		// only a single (var)name is allowed
+	syntax [name(name=by)] [, Missing FORCE /*ADDED AUG 2019 FOR v3.3*/ ]		// only a single (var)name is allowed
 	local bymissing `missing'
 
 	local by_rc = 0
@@ -326,14 +347,16 @@ program define ipdmetan, rclass
 	// However, for "raw data", these options may only "clash" (i.e. be subject to prioritisation) in terms of whether on/off,
 	//   not in terms of the actual statistic used (that would be a "true" clash, resulting in an exit with error).
 	
-	// N.B. At this stage we also want to isolate the effect MEASURE, to be sent to admetan.ado in the summstat() option.
-	// (METHODs of analysis are not dealt with here, but in admetan.ado.)
+	// N.B. At this stage we also want to isolate the effect MEASURE, to be sent to -metan- in the summstat() option.
+	// (METHODs of analysis are not dealt with here, but in -metan- )
 	
 	cap nois ParseFPlotOpts, cmdname(`cmdname') mainprog(ipdmetan) options(`opts_ipdm') `forestplot'
 		
 	if _rc {
-		if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ParseFPlotOpts}"'
-		else nois disp as err `"Error in {bf:ipdmetan.ParseFPlotOpts}"'
+		if `"`err'"'==`""' {
+			if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ParseFPlotOpts}"'
+			else nois disp as err `"Error in {bf:ipdmetan.ParseFPlotOpts}"'
+		}
 		c_local err noerr		// tell ipdover not to also report an "error in {bf:ipdmetan}"
 		exit _rc
 	}
@@ -342,11 +365,11 @@ program define ipdmetan, rclass
 	local log      `s(log)'
 	local summstat `s(summstat)'
 	local effect     `"`s(effect)'"'
-	local opts_ipdm  `"`s(opts_parsed)' `s(options)'"'		// options as listed above, plus other options supplied directly to admetan
+	local opts_ipdm  `"`s(opts_parsed)' `s(options)'"'		// options as listed above, plus other options supplied directly to -metan-
 	local opts_fplot `"`s(opts_fplot)'"'					// other options supplied as sub-options to forestplot() 	
 
 	
-	** Now, if one observation per study, pass directly to -admetan- ...
+	** Now, if one observation per study, pass directly to -metan- ...
 	if `"`ipdover'"'==`""' {
 		qui tab `study' if `touse', `smissing'
 		// if r(r)==r(N) {		
@@ -360,16 +383,16 @@ program define ipdmetan, rclass
 					exit 2000
 				}
 			}
-			
+
 			local sortby = cond("`sortby'"=="_n", "", "`sortby'")
-			cap nois admetan_setup `invlist' if `touse', study(`studyopt') by(`byopt') ///
+			cap nois metan_setup `invlist' if `touse', study(`studyopt') by(`byopt') ///
 				sortby(`sortby') ad(`ad') forestplot(`opts_fplot') ///
 				effect(`effect') summstat(`summstat') `eform' `log' `opts_ipdm'
 
 			if _rc {
 				if `"`err'"'==`""' {
-					if _rc==1 nois disp as err `"User break in {bf:ipdmetan.admetan_setup}"'
-					else nois disp as err `"Error in {bf:ipdmetan.admetan_setup}"'
+					if _rc==1 nois disp as err `"User break in {bf:ipdmetan.metan_setup}"'
+					else nois disp as err `"Error in {bf:ipdmetan.metan_setup}"'
 				}
 				exit _rc
 			}
@@ -378,7 +401,7 @@ program define ipdmetan, rclass
 			exit
 		}
 		
-		// If not sending directly to -admetan-, default sorting is `study'
+		// If not sending directly to -metan-, default sorting is `study'
 		local sortby = cond("`sortby'"=="_n", "", cond("`sortby'"!="", "`sortby'", "`study'"))
 	}
 
@@ -408,7 +431,7 @@ program define ipdmetan, rclass
 		noGRaph noHET noWT noEXTRALine ///
 		/// Undocumented options
 		ZTOL(passthru)            /// ztol = tolerance for z-score (abs(ES/seES))
-		* ]                       // Remaining options will be passed through to admetan.ado
+		* ]                       // Remaining options will be passed through to -metan-
 
 	local extraline = cond("`extraline'"!="", "no", "")			// for clarity later
 	local sgwt = cond("`sgweight'"!="", "sgwt", "`sgwt'")		// sgweight is a synonym (for compatibility with metan.ado)
@@ -421,7 +444,7 @@ program define ipdmetan, rclass
 
 	
 	** Option compatibility tests relevant to -ipdover- and "generic" vs "specific" effect measure
-	// (N.B. leave more specific MA-related compatibility tests to admetan.ado)
+	// (N.B. leave more specific MA-related compatibility tests to -metan- )
 	if `"`exp_list'"'!=`""' & `"`interaction'"'!=`""' {
 		nois disp as err `"{it:exp_list} and {bf:interaction} may not be combined"'
 		exit 184
@@ -443,9 +466,9 @@ program define ipdmetan, rclass
 	}
 	if `"`cmdstruc'"'==`"generic"' {
 		local 0 `", `opts_ipdm'"'
-		syntax [, MH PETO LOGRank COHen HEDges GLAss noSTANdard * ]		// N.B. `counts' has already been parsed [May 2018: ...and `group1', `group2' removed]
-		if trim(`"`mh'`peto'`logrank'`cohen'`hedges'`glass'`standard'`counts'"') != `""' {
-			local erropt : word 1 of `mh' `peto' `logrank' `cohen' `hedges' `glass' `standard' `counts'
+		syntax [, MH PETO LOGRank COHend HEDgesg GLAssd noSTANdard * ]		// N.B. `counts' has already been parsed [May 2018: ...and `group1', `group2' removed]
+		if trim(`"`mh'`peto'`logrank'`cohend'`hedgesg'`glassd'`standard'`counts'"') != `""' {
+			local erropt : word 1 of `mh' `peto' `logrank' `cohend' `hedgesg' `glassd' `standard' `counts'
 			nois disp as err `"option {bf:`erropt'} is incompatible with {it:command}-based syntax (Syntax 1)"'
 			exit 198
 		}
@@ -577,7 +600,7 @@ program define ipdmetan, rclass
 	// - decode any string variables (including if ipdover)
 	cap nois ProcessIDs if `touse', study(`studyopt') studyid(`StudyID') by(`_BY') obs(`obs') ///
 		tvlist(`tvlist') tnlist(`tnlist') labfile(`labfile') ///
-		sortby(`sortby') cmdstruc(`cmdstruc') plname(`plname') `ipdover'
+		sortby(`sortby') cmdstruc(`cmdstruc') plname(`plname') `ipdover' `force' /*ADDED AUG 2019 FOR v3.3*/
 	
 	if _rc {
 		if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ProcessIDs}"'
@@ -654,7 +677,7 @@ program define ipdmetan, rclass
 		forvalues i=1/`ni' {
 			local coli : word `i' of `lrcols'
 		
-			// form new `lcols' and `rcols', just containing new varnames (to pass to forestplot via admetan/ipdover)
+			// form new `lcols' and `rcols', just containing new varnames (to pass to forestplot, via -metan- or -ipdover- )
 			// also retrieve `tempcols'
 			local side : word `i' of `sidelist'
 			if !`side' local lcols `lcols' `coli'
@@ -664,7 +687,7 @@ program define ipdmetan, rclass
 			local itype : word `i' of `itypes'
 			if "`itype'"=="a" {								// a: AD-only vars, not currently in memory
 				local ++na
-				local namesa `namesa' `coli'				// AD varlist, to be passed on to -admetan-
+				local namesa `namesa' `coli'				// AD varlist, to be passed on to -metan-
 			}
 			else if "`itype'"=="c" {						// c: Numeric vars to collapse
 				local ++nc
@@ -804,7 +827,7 @@ program define ipdmetan, rclass
 				nois disp as err `"Note: {bf:plotid(_BYAD)} cannot be specified without aggregate data and will be ignored"'
 				local plotid
 			}
-			local plname		// i.e. don't use further in -ipdmetan- (but plotid() will be used in -admetan-)
+			local plname		// i.e. don't use further in -ipdmetan- (but plotid() will be used in -metan-)
 		}
 		else if "`plname'"=="`by'" & "`by'"!="" & !`by_rc' local plotid `"_BY`plotidopts'"'
 		else if "`plname'"=="`study'" local plotid `"_STUDY`plotidopts'"'
@@ -828,7 +851,7 @@ program define ipdmetan, rclass
 		}
 	}
 	if `"`plotid'"'!=`""' {																	// `plotid' not needed anymore in -ipdmetan- ...
-		if `"`ipdover'"'==`""' local opts_ipdm  `"`macval(opts_ipdm)'  plotid(`plotid')"'	// if passing to `admetan', add to `opts_ipdm'...
+		if `"`ipdover'"'==`""' local opts_ipdm  `"`macval(opts_ipdm)'  plotid(`plotid')"'	// if passing to -metan- , add to `opts_ipdm'...
 		else                   local opts_fplot `"`macval(opts_fplot)' plotid(`plotid')"'	// ... else, add to `opts_fplot'
 	}
 
@@ -905,14 +928,14 @@ program define ipdmetan, rclass
 		// CheckOpts will have stored the following in summstat():
 		// or, hr, shr, irr, rr, rrr, rd, smd or wmd (N.B. md is assumed to be a synonym for wmd)
 
-		// If `summstat' does not yet exist, check remaining options for iv, mh, peto, logrank, cohen, hedges, glass, (no)standard
+		// If `summstat' does not yet exist, check remaining options for iv, mh, peto, logrank, cohend, hedgesg, glassd, (no)standard
 		//   If no `summstat' yet, use this info to generate a default value for `summstat'
 		//   Otherwise, check for conflicts between these options and existing value of `summstat'
-		// (N.B. A full parse of `method' will be done by admetan.ado)
+		// (N.B. A full parse of `method' will be done by -metan- )
 		
 		local 0 `", `opts_ipdm'"'
-		syntax [, IV MH PETO LOGRank COHen HEDges GLAss noSTANdard NPTS(string) BYAD VARS(string) * ]
-		local opts_ipdm `options'
+		syntax [, IV MH PETO LOGRank COHend HEDgesg GLAssd noSTANdard NPTS(string) BYAD VARS(string) * ]
+		local opts_ipdm : copy local options
 
 		
 		// First, take opportunity to check for options supplied to -ipdmetan-
@@ -931,7 +954,7 @@ program define ipdmetan, rclass
 		// Now continue with `summstat' processing
 		if `"`summstat'"'!=`""' {
 			cap {
-				if trim(`"`cohen'`glass'`hedges'"')!=`""' assert `"`summstat'"'==`"smd"'
+				if trim(`"`cohend'`glassd'`hedgesg'"')!=`""' assert `"`summstat'"'==`"smd"'
 				if `"`standard'"'!=`""' assert `"`summstat'"'==`"wmd"'
 				if `"`peto'"'!=`""'     assert `"`summstat'"'==`"or"'
 				if `"`logrank'"'!=`""'  assert inlist(`"`summstat'"', "hr", "shr")
@@ -956,7 +979,7 @@ program define ipdmetan, rclass
 				local summstat rr
 				local seffect = cond(`"`effect'"'==`""', `"Risk Ratio"', `"`effect'"')
 			}
-			else if trim(`"`cohen'`glass'`hedges'"')!=`""' {
+			else if trim(`"`cohend'`glassd'`hedgesg'"')!=`""' {
 				local summstat smd
 				local seffect = cond(`"`effect'"'==`""', `"SMD"', `"`effect'"')
 			}
@@ -972,8 +995,8 @@ program define ipdmetan, rclass
 		}
 		
 		local logrank = cond(inlist("`summstat'", "hr", "shr"), "logrank", "")
-		local opts_ipdm = trim(`"`macval(opts_ipdm)' `iv' `mh' `peto' `logrank' `cohen' `hedges' `glass' `standard'"')
-		// now logrank has potentially been altered, put all these options back into `opts_ipdm' for passing to -admetan-
+		local opts_ipdm = trim(`"`macval(opts_ipdm)' `iv' `mh' `peto' `logrank' `cohend' `hedgesg' `glassd' `standard'"')
+		// now logrank has potentially been altered, put all these options back into `opts_ipdm' for passing to -metan-
 		
 		local invlen : word count `invlist'		
 		local expect = cond("`logrank'"!="", "one", "two")
@@ -996,7 +1019,7 @@ program define ipdmetan, rclass
 		keep `touse' `studylist' `StudyID' `invlist' `_BY' `stvars' `strata' `coldnames' `wgtvar'
 
 		
-		* Setup `outvlist' ("output" varlist, to become the *input* into -admetan-, or to be returned to -ipdover-)
+		* Setup `outvlist' ("output" varlist, to become the *input* into -metan-, or to be returned to -ipdover-)
 		// (as opposed to `invlist' which is the varlist *inputted by the user* into -ipdmetan- or -ipdover- !)
 		// ... and `cclist' (to pass to -collapse-)
 		tokenize `invlist'
@@ -1075,9 +1098,9 @@ program define ipdmetan, rclass
 	}			// end else (i.e. if "`cmdstruc'"=="specific")
 
 
-	// Finalise "ipdmetan" options to send to admetan_setup
+	// Finalise "ipdmetan" options to send to "metan_setup"
 	local lrvlist = cond(`"`logrank'"'==`""', `""', `"`lrvlist'"')		// in case `lrvlist' passed from -ipdover-
-	local admopts `"estexp(`estexp') explist(`exp_list') `interaction' ipdxline(`extraline') lrvlist(`lrvlist')"'
+	// local opts_adm `"estexp(`estexp') explist(`exp_list') `interaction' extraline(`extraline') lrvlist(`lrvlist')"'
 	// explist(`exp_list') added Dec 2018 for v3.0.1
 	
 
@@ -1112,7 +1135,7 @@ program define ipdmetan, rclass
 						exit _rc
 					}
 				}
-								
+
 				qui collapse `cclist' `r(cclist)' if `touse2' `cmdwt' `r(cmdwt)', fast by(`_BY' `overh' `StudyID')
 				qui gen byte `tempuse' = 1
 				qui save `extra1_`h''
@@ -1163,7 +1186,7 @@ program define ipdmetan, rclass
 					tempfile extra1_tot
 					qui collapse `cclist' `r(cclist)' if `touse' `cmdwt' `r(cmdwt)', fast 		// overall
 					qui gen byte `tempuse' = 5													// (or "subgroup" level for byad...
-					qui save `extra1_tot'														//   ...this will be changed within admetan.ProcessAD)
+					qui save `extra1_tot'														//   ...this will be changed within ProcessAD)
 				}
 				restore, preserve
 			}
@@ -1319,7 +1342,7 @@ program define ipdmetan, rclass
 	
 	
 	*******************************
-	* Pass to admetan for pooling *  -- or prepare to return data to ipdover
+	* Pass to -metan- for pooling *  -- or prepare to return data to -ipdover-
 	*******************************
 
 	// Load study/over value labels
@@ -1329,29 +1352,25 @@ program define ipdmetan, rclass
 	local effect = cond(`"`effect'"'!=`""', `"`effect'"', ///
 		cond(`"`seffect'"'!=`""', `"`seffect'"', "Effect"))
 	
-	// Branch by admetan or ipdover 
+	// Branch by -metan- or -ipdover-
 	if `"`ipdover'"'==`""' {
 	
 		if `"`StudyID'"'!=`"_STUDY"' qui drop `StudyID'
 		confirm numeric var _STUDY
-		// cap label drop _STUDY
-		// label copy `vallab1' _STUDY				// standardise value label name
-		// label values _STUDY _STUDY
 		label values  _STUDY `vallab1'
 		label variable _STUDY `"`svarlab'"'
-		// 3rd July 2018: but what if IPD "is AD"? (i.e. is original data)
-		//  - this is why a separate subroutine, "admetan_setup", is needed
-
-		cap nois admetan_setup `outvlist', study(`studyopt') by(`byopt') citype(`citype') `interaction' ///
+		
+		cap nois metan_setup `outvlist', study(`studyopt') by(`byopt') citype(`citype') ///
 			effect(`effect') df(`_df') wgt(`wgtvar') `eform' `log' ///
-			`graph' `overall' `subgroup' `keepall' `keeporder' `het' ///
+			`graph' `overall' `subgroup' `keepall' `keeporder' `het' `interaction' ///
 			forestplot(`opts_fplot') lcols(`lcols') rcols(`rcols') saving(`saving') `ztol' `level' ///
-			admopts(`admopts') cmdstruc(`cmdstruc') summstat(`summstat') ad(`ad') nokeepvars `opts_ipdm'
+			cmdstruc(`cmdstruc') summstat(`summstat') ad(`ad') nokeepvars ///
+			estexp(`estexp') explist(`exp_list') extraline(`extraline') lrvlist(`lrvlist') `opts_ipdm'
 		
 		if _rc {
 			if `"`err'"'==`""' {
-				if _rc==1 nois disp as err `"User break in {bf:ipdmetan.admetan_setup}"'
-				else nois disp as err `"Error in {bf:ipdmetan.admetan_setup}"'
+				if _rc==1 nois disp as err `"User break in {bf:ipdmetan.metan_setup}"'
+				else nois disp as err `"Error in {bf:ipdmetan.metan_setup}"'
 			}
 			exit _rc
 		}
@@ -1365,15 +1384,22 @@ program define ipdmetan, rclass
 		// Sort out _rsample (already done if "estimation")
 		if `"`cmdstruc'"'==`"specific"' & "`rsample'"=="" {
 			qui keep if _USE==1
-			qui keep _STUDY _USE
+			qui keep _STUDY `_BY' _USE		// MODIFIED AUG 2019 FOR v3.3
 			qui rename _STUDY `study'
+			if `"`_BY'"'!=`""' {			// ADDED AUG 2019 FOR v3.3
+				confirm numeric var _BY
+				qui rename _BY `by'
+			}
 			qui rename _USE `touse'
 			qui save `ipdfile', replace
 
 			restore, preserve
 
 			qui gen long `tempuse' = _n
-			qui merge m:1 `touse' `study' using `ipdfile', assert(match master) gen(`touse2')
+		
+			// MODIFIED AUG 2019 FOR v3.3
+			// qui merge m:1 `touse' `study' using `ipdfile', assert(match master) gen(`touse2')
+			qui merge m:1 `touse' `study' `by' using `ipdfile', assert(match master) gen(`touse2')
 			sort `tempuse'
 			
 			cap drop _rsample
@@ -1397,8 +1423,8 @@ program define ipdmetan, rclass
 		
 	*** -ipdover- stuff ***
 	
-	// Else, more processing is required to obtain _ES, _seES, _LCI and _UCI before passing back to ipdover.ado
-	// (N.B. these are mostly processes otherwise done by admetan.ado)
+	// Else, more processing is required to obtain _ES, _seES, _LCI and _UCI before passing back to -ipdover-
+	// (N.B. these are mostly processes otherwise done by -metan- )
 	else {
 
 		// Store "over" value labels in new var "_LABELS"
@@ -1409,6 +1435,10 @@ program define ipdmetan, rclass
 			if `"`vallab`h''"'!=`""' {				// use value labels loaded from `labfile'
 				label values _LEVEL `vallab`h''
 				qui decode _LEVEL, gen(`labelh')
+				qui replace `labelh' = strofreal(_LEVEL, "`: format _LEVEL'") if missing(`labelh') & !missing(_LEVEL)
+				// ^^ added Aug 2020;  if *some* values are labelled but *not* all, take the values themselves
+				// -decode- replaces with missing if no label defined for a particular value
+				
 				if `overlen'>1 {
 					qui replace _LABELS=`labelh' if _OVER==`h'
 				}
@@ -1450,8 +1480,8 @@ program define ipdmetan, rclass
 		return local rcols  `"`rcols'"'
 		// plus: `wt' (already done)
 
-		// Overall number of participants for ipdover.ado
-		// (this is otherwise handled by admetan.ado)
+		// Overall number of participants for -ipdover-
+		// (this is otherwise handled by -metan- )
 		qui gen long `obs' = _n				// tempvar has already been declared
 		summ `obs' if _USE==5, meanonly
 		if r(N) {
@@ -1462,7 +1492,7 @@ program define ipdmetan, rclass
 		// return statistics for to "specific" effect measures (Syntax 2)
 		if `"`cmdstruc'"'==`"specific"' {
 			return local lrvlist  `lrvlist'
-			return local invlist  `outvlist'				// N.B. `outvlist' becomes `invlist' for clearer comparison with admetan.ado code
+			return local invlist  `outvlist'				// N.B. `outvlist' becomes `invlist' for clearer comparison with -metan- code
 			return local summstat `summstat'
 			return local log      `log'
 		}
@@ -1621,7 +1651,7 @@ end
 program define ProcessIDs, rclass sortpreserve
 
 	syntax [if] [in], STUDY(string) CMDSTRUC(string) LABFILE(string) OBS(name) TVLIST(namelist) TNLIST(namelist) ///
-		[BY(varname) SORTBY(varname) PLNAME(varname) IPDOVER STUDYID(name) ]
+		[BY(varname) SORTBY(varname) PLNAME(varname) IPDOVER STUDYID(name) FORCE /*ADDED Aug 2019 for v3.3*/ ]
 	
 	marksample touse
 
@@ -1658,6 +1688,8 @@ program define ProcessIDs, rclass sortpreserve
 			local ns = `studyid'[_N]					// number of studies, equal to max(`sgroup')
 			qui drop `sobs'
 		
+			// MODIFIED AUG 2019 FOR v3.3
+			/*
 			// test to see if subgroup variable varies within studies; if it does, exit with error
 			if `"`cmdstruc'"'==`"generic"' {
 
@@ -1685,6 +1717,40 @@ program define ProcessIDs, rclass sortpreserve
 					}
 				}
 			}		// end if `"`cmdstruc'"'==`"generic"'
+			*/
+			
+			// Check for "deluded" meta-analysis: subgroup variable varies within studies
+			if `"`force'"'==`""' {
+				qui tab `overh' if `stouse', m
+				if r(r) != `ns' {					// N.B. `ns' is already stratified by `by'
+					nois disp as err `"Data is not suitable for meta-analysis"'
+					nois disp as err `"  as variable {bf:`by'} (in option {bf:by()}) is not constant within studies."'
+					nois disp as err `"Use either the (undocumented) option {bf:by(}{it:varname}{bf:, force)}, or the alternative command {bf:ipdover}."'
+					nois disp as err `"For more details on the reasoning behind this, see:"'
+					nois disp as err `"  {browse "https://www.bmj.com/content/356/bmj.j573":Fisher DJ et al. BMJ 2017; 356: j573}"'
+					exit 198
+				}
+			}
+			
+			// also test plname in the same way (if exists)
+			if `"`plname'"'!=`""' {
+				if `"`force'"'!=`""' {
+					local byopt `by'
+					local addtext " and subgroups"
+				}
+				tempvar tempgp
+				qui bysort `stouse' `plname' `overh' `byopt' : gen long `tempgp' = (_n==1)*`stouse'
+				qui replace `tempgp' = sum(`tempgp')
+				summ `tempgp', meanonly
+				local ntg = r(max)
+				drop `tempgp'
+				
+				if `ntg' > `ns' {
+					nois disp as err `"variable {bf:`plname'} in option {bf:plotid()} is not constant within studies`addtext'"'
+					exit 198
+				}
+			}
+			
 		}		// end if `"`ipdover'"'==`""'
 		
 		* Store variable label
@@ -1722,6 +1788,7 @@ program define ProcessIDs, rclass sortpreserve
 			
 			qui levelsof `overh' if `stouse', `missing' local(levels)
 			if `"`levels'"'!=`""' {
+				/*
 				local countx = 0
 				foreach x of local levels {
 					if `x' != . {				// cannot label "."
@@ -1730,7 +1797,31 @@ program define ProcessIDs, rclass sortpreserve
 						local ++countx
 					}
 				}
-				if `countx' local lablist `"`lablist' `vallab`h''"'
+				*/
+				// Modified Aug 2020 to preserve "extra" label mappings (i.e. values don't appear in IPD)
+				//  because they might appear in AD instead... e.g. there might be an agreed "project-wide" label mapping
+				if `"`: value label `overh''"'==`""' {		// if no existing label
+					foreach x of local levels {
+						if `x' != . {				// cannot label "."
+							local labname : label (`overh') `x'
+							label define `vallab`h'' `x' `"`labname'"', add
+						}
+					}
+				}
+				else {										// add to existing label
+					label copy `: value label `overh'' `vallab`h''
+					foreach x of local levels {
+						if `x' != . {				// cannot label "."
+							local labname : label (`overh') `x'
+							if `"`labname'"'==`""' {
+								label define `vallab`h'' `x' `"`x'"', add
+							}
+						}
+					}
+				}
+				local miss .
+				local levels : list levels - miss
+				if `"`levels'"'!=`""' local lablist `"`lablist' `vallab`h''"'
 			}
 		}
 
@@ -1756,8 +1847,8 @@ end
 *   b. Check for conflicts between main options and forestplot() suboptions.
 
 * Notes:
-// N.B. This program is used by both -ipdmetan- and -admetan-.
-// Certain options may be supplied EITHER to ipdmetan/admetan directly, OR as sub-options to forestplot()
+// N.B. This program is used by both -ipdmetan- and -metan-.
+// Certain options may be supplied EITHER to ipdmetan/metan directly, OR as sub-options to forestplot()
 //   with "forestplot options" prioritised over "main options" in the event of a clash.
 // These options are:
 // - effect/eform options parsed by CheckOpts (e.g. `rr', `rd', `md', `smd', `wmd', `log')
@@ -1773,7 +1864,7 @@ program define ParseFPlotOpts, sclass
 	syntax [, CMDNAME(string) MAINPROG(string) OPTIONS(string asis) FORESTplot(string asis)]
 
 		
-	** Parse "main options" (i.e. options supplied directly to -ipdmetan- or -admetan-)
+	** Parse "main options" (i.e. options supplied directly to -ipdmetan- or -metan-)
 	local 0 `", `options'"'
 	syntax [, noGRaph noHET noOVerall noSUbgroup noWARNing noWT noSTATs ///
 		EFFect(string asis) COUNTS(string asis) ///
@@ -1820,8 +1911,6 @@ program define ParseFPlotOpts, sclass
 	local summstat  `"`s(summstat)'"'
 	if `"`effect'"'==`""' local effect `"`s(effect)'"'
 	// N.B. `s(effect)' contains automatic effect text from -eform-; `effect' contains user-specified text
-
-	sreturn clear
 		
 
 	** Now parse "forestplot options" if applicable
@@ -1840,7 +1929,7 @@ program define ParseFPlotOpts, sclass
 		}
 		
 		// (Note 23rd May 2018: noextraline is a forestplot() suboption only,
-		//   but is unique in that it is needed *only* by -admetan.BuildResultsSet- and *not* by -forestplot-)
+		//   but is unique in that it is needed *only* by -metan.BuildResultsSet- and *not* by -forestplot-)
 		local 0 `", `forestplot'"'
 		syntax [, noGRaph noHET noOVerall noSUbgroup noWARNing noWT noSTATs ///
 			EFFect(string asis) COUNTS(string asis) ///
@@ -1877,7 +1966,7 @@ program define ParseFPlotOpts, sclass
 		if _rc {
 			if _rc==1 disp as err `"User break in {bf:`mainprog'.CheckOpts}"'
 			else disp as err `"Error in {bf:`mainprog'.CheckOpts}"'
-			c_local err noerr		// tell ipdmetan not to also report an "error in {bf:admetan.ParseFPlotOpts}"
+			c_local err noerr		// tell main program not to also report an error in ParseFPlotOpts
 			exit _rc
 		}
 		local opts_fplot `"`s(options)'"'
@@ -1957,9 +2046,9 @@ end
 * CheckOpts
 // Based on the built-in _check_eformopt.ado,
 //   but expanded from -eform- to general effect specifications.
-// This program is used by both -ipdmetan- and -admetan-
-//   and not all aspects are relevant to both.
-// Easier to maintain just a single program, though.
+// This program is used by -metan-, -ipdmetan- and -forestplot-
+// Not all aspects are relevant to all programs,
+//   but easier to maintain just a single subroutine!
 
 // subroutine of ParseFPlotOpts
 
@@ -2007,21 +2096,21 @@ program define CheckOpts, sclass
 	// identify multiple options; exit with error if found
 	opts_exclusive "`coef' `log' `nohr' `noshr'"
 	if `"`summstat'"'!=`""' {
-		if trim(`"`md'`smd'`wmd'`rr'`rd'`nohr'`noshr'"')!=`""' {
-			opts_exclusive "`summstat' `md' `smd' `wmd' `rr' `rd' `nohr' `noshr'"
-		}
+		opts_exclusive "`summstat' `md' `smd' `wmd' `rr' `rd' `nohr' `noshr'"
 	}
 	
 	// if "nonstandard" effect option used
 	else {
 		if `"`md'`wmd'"'!=`""' {		// MD and WMD are synonyms
 			local effect WMD
+			if `"`eform'"'!=`""' local effect "exp(WMD)"
 			local summstat wmd
 		}
-		else {
-			local effect = cond("`smd'"!="", `"SMD"', ///
-				cond("`rd'"!="", `"Risk Diff."', `"`effect'"'))
-			local summstat = cond(`"`summstat'"'==`""', trim(`"`smd'`rd'"'), `"`summstat'"')
+		else if `"`smd'`rd'"'!=`""' {
+			if "`smd'"!="" local effect SMD
+			else if "`rd'"!="" local effect "Risk Diff."
+			if `"`eform'"'!=`""' local effect `"exp(`effect')"'
+			local summstat `smd'`rd'
 		}
 		else if "`nohr'"!="" {
 			local effect `"Haz. Ratio"'
@@ -2032,7 +2121,7 @@ program define CheckOpts, sclass
 			local effect `"SHR"'
 			local summstat shr
 			local logopt noshr
-		}		
+		}
 
 		// now check against program properties and issue warning
 		if "`cmdname'"!="" {
@@ -2422,7 +2511,7 @@ program define CommandLoop, rclass sortpreserve
 	syntax [anything(name=exp_list equalok)] [if] [in] [fw aw pw iw], IPDFILE(string) CMDNAME(string) STUDY(string) STUDYID(name) ///
 		[CMDBEFORE(string) CMDAFTER(string) noOVERALL noSUBGROUP noTOTAL noRSample ///
 		BY(string) SORTBY(varname numeric) POOLVAR(string) INTERACTION STATSR(string) NAMESR(string) MESSAGES ///
-		IPDOVER OVERLEN(integer 1) LEVEL(passthru) ZTOL(real 1e-6) EFORM ADopt ]
+		IPDOVER OVERLEN(integer 1) LEVEL(passthru) ZTOL(real 1.0x-1a) EFORM ADopt ]
 	
 	// Save any existing estimation results, and clear return & ereturn
 	tempname est_hold
@@ -2864,7 +2953,7 @@ end
 
 * ProcessRawData
 
-* Setup `outvlist' ("output" varlist, to become the *input* into -admetan-, or to be returned to -ipdover-)
+* Setup `outvlist' ("output" varlist, to become the *input* into -metan-, or to be returned to -ipdover-)
 // (as opposed to `invlist' which is the varlist *inputted by the user* into -ipdmetan- or -ipdover- !)
 // ... and `cclist' (to pass to -collapse-)
 
@@ -3368,19 +3457,20 @@ end
 
 ***********************************
 
-* Prepare data for sending to admetan
+* Prepare data for sending to -metan-
 // including processing of ad() option
 
-program define admetan_setup, rclass
+program define metan_setup, rclass
 
 	syntax varlist(min=2 max=6 numeric) [if] [in], STUDY(string) [BY(string) ///
 		/// /* options for IPD +/- AD only */
-		ADMOPTS(string asis) CMDSTRUC(string) IPDFILE(string) AD(passthru) PLOTID(string) ///
+		CMDSTRUC(string) IPDFILE(string) AD(passthru) PLOTID(string) KEEPAll ///
+		ESTEXP(passthru) EXPLIST(passthru) INTERaction EXTRALINE(passthru) LRVLIST(passthru) ///
 		/// /* options potentially modified by AD */
-		EFORM LOG LOGRank EFFECT(string) METHOD(string) SUMMSTAT(string) NPTS(varname) NPTS2 noINTeger noKEEPVars noRSample * ]
+		EFORM LOG LOGRank EFFECT(string) SUMMSTAT(string) NPTS(varname) NPTS2 noINTeger noKEEPVars noRSample * ]
 
 	local opts_ipdm `"`macval(options)'"'
-	local invlist `varlist'					// now we are dealing with admetan-related stuff, so use `invlist' (i.e. "into admetan") ...
+	local invlist `varlist'					// now we are dealing with metan-related stuff, so use `invlist' (i.e. "into metan") ...
 											// ...	instead of `outvlist' ("out of/derived from IPD")
 	
 	marksample touse, novarlist		// `novarlist' option so that entirely missing/nonexistent studies/subgroups may be included
@@ -3416,7 +3506,7 @@ program define admetan_setup, rclass
 	else {
 		qui count
 		local origN = r(N)
-		local preserve preserve		// Oct 2018: to pass on to -admetan- ... want -admetan- to treat as if NOT preserved
+		local preserve preserve		// Oct 2018: to pass on to -metan- ... want -metan- to treat as if NOT preserved
 		preserve					// ...so that "stored variables" are handled correctly
 
 		local studyopt `study'		// full option (including `missing' if supplied), for ProcessAD
@@ -3457,12 +3547,12 @@ program define admetan_setup, rclass
 			}
 		
 			// Convert `study' and `by' to numeric if necessary; this will make things easier for ProcessAD
-			cap nois ProcessLabels if `touse', ///
+			cap nois ProcessLabelsIPD if `touse', ///
 				study(`study') newstudy(`newstudy') newstudylab(`newstudylab') ///
 				   by(`by')       newby(`newby')       newbylab(`newbylab')
 			if _rc {
-				if _rc==1 nois disp as err `"User break in {bf:admetan.ProcessLabels} when applied to IPD"'
-				else if _rc!=2000 nois disp as err `"Error in {bf:admetan.ProcessLabels} when applied to IPD"'
+				if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ProcessLabels} when applied to IPD"'
+				else if _rc!=2000 nois disp as err `"Error in {bf:ipdmetan.ProcessLabels} when applied to IPD"'
 				exit _rc
 			}
 			
@@ -3477,18 +3567,12 @@ program define admetan_setup, rclass
 				label variable `_BY' `"`byvarlab'"'
 			}
 			// _STUDY is now guaranteed to (a) exist; (b) be numeric with a value label.
-			
+
 		}
 	}		// end if "`cmdstruc'"==""
 		
-	if `"`ad'"'!=`""' {	
-
-		// Jan 2019 for v3.2:  Keep track of "stored" varnames found in AD only, not in IPD
-		foreach v in _ES _seES _LCI _UCI _WT _NN _CC {
-			cap confirm var `v'
-			if !_rc local ipdstored `ipdstored' `v'
-		}
-	
+	if `"`ad'"'!=`""' {
+		
 		// Declare tempvars `newstudy' and `newby' for use if string
 		//   and `_SOURCE' (with label `sourcelab') to store source of data (IPD or AD).
 		tempvar newstudy newby _SOURCE
@@ -3509,7 +3593,7 @@ program define admetan_setup, rclass
 					if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ProcessAD}"'
 					else nois disp as err `"Error in {bf:ipdmetan.ProcessAD}"'
 				}
-				c_local err noerr		// tell ipdmetan not to also report an "error in {bf:admetan_setup}"
+				c_local err noerr		// tell ipdmetan not to also report an "error in {bf:metan_setup}"
 				exit _rc
 			}
 		}
@@ -3521,17 +3605,14 @@ program define admetan_setup, rclass
 	
 		// these options are only overwritten in certain circumstances,
 		// e.g. if the IPD was "generic"; see code of ProcessAD
-		if `"`r(effect)'"'!=`""' local effect `"`r(effect)'"'
-		if `"`method'"'==`""' local method `r(method)'
-		if `"`summstat'"'==`""' local summstat `r(summstat)'
+		if `"`s(effect)'"'!=`""' local effect `"`s(effect)'"'
+		if `"`summstat'"'==`""' local summstat `s(summstat)'
 	
-		local eform   `r(eform)'
-		local logrank `r(logrank)'
-		local invlist `r(invlist)'
-		local _NN     `r(npts)'
-		local _BY     `r(by)'				// N.B. contains _SOURCE if `byad'
-		local byad    `r(byad)'
-		local sourceopt `"source(`_SOURCE')"'
+		local eform   `s(eform)'
+		local logrank `s(logrank)'
+		local invlist `s(invlist)'
+		local _NN     `s(npts)'
+		local _BY     `s(by)'
 		
 		// sort out plotid if byad
 		// (oct 2018: moved from -admetan-)
@@ -3541,38 +3622,63 @@ program define admetan_setup, rclass
 			if `"`namelist'"'==`"_BYAD"' local plotid `"`_SOURCE', `options'"'
 		}
 		
-		// UP TO HERE 25th JAN
-		// Jan 2019 for v3.2:  Keep track of "stored" varnames found in AD only, not in IPD
-		foreach v in _ES _seES _LCI _UCI _WT _NN _CC {
-			cap confirm var `v'
-			if !_rc & !`: list v in ipdstored' local adstored `adstored' `v'
+	
+		// NOV 2019: Print to screen
+		disp as text _n "Studies included from IPD: " as res `s(kIPD)'
+		if "`keepall'"!="" & `s(kIPD_2)' {
+			local plural = cond(`s(kIPD_2)'==1, "study", "studies")
+			disp as text "  plus " as res `s(kIPD_2)' as text " `plural' with insufficient data"
+		}		
+		local dispnpts = cond(missing(`s(nIPD)'), "Unknown", string(`s(nIPD)'))
+		disp as text "Participants included from IPD: " as res "`dispnpts'"
+		if "`keepall'"!="" & !missing(`s(nIPD_2)') {
+			local s = cond(`s(nIPD_2)'>1, "s", "")
+			disp as text "  plus " as res `s(nIPD_2)' as text " participant`s' with insufficient data"
 		}
-		if `"`adstored'"'!=`""' local storedopt `"stored(`adstored')"'
 		
-	}
+		disp as text _n "Studies included from aggregate data: " as res `s(kAD)'
+		if "`keepall'"!="" & `s(kAD_2)'{
+			local plural = cond(`s(k_AD2)'==1, "study", "studies")
+			disp as text "  plus " as res `s(k_AD2)' as text " `plural' with insufficient data"
+		}
+		local dispnpts = cond(missing(`s(nAD)'), "Unknown", string(`s(nAD)'))
+		disp as text "Participants included from aggregate data: " as res "`dispnpts'"
+		if "`keepall'"!="" & !missing(`s(nAD_2)') {
+			local s = cond(`s(nAD_2)'>1, "s", "")
+			disp as text "  plus " as res `s(nAD_2)' as text " participant`s' with insufficient data"
+		}
+		local header noheader
+	}		// end if `"`_SOURCE'"'!=`""' {
+	
 	if `"`_BY'"'!=`""' local byopt `"`_BY', m"'						// August 2018
 	if `"`_NN'"'!=`""' local nptsopt `"`_NN', `plot' `integer'"'	// October 2018
 	// (Note: `_STUDY' is guaranteed to exist, so don't need to worry about it being empty)
 
+	
+	// NOV 2019: no need to have both `summstat' and `eform';  -metan- will sort that out
+	if inlist("`summstat'", "or", "hr", "shr", "irr", "rr", "rrr") {
+		local eform
+	}
+	// PREVIOUS NOTES:
+	// N.B. `summstat' and `log' are *not* passed to -metan-
+	//  as all the necessary info is already stored in `eform' and `effect'.
+
 	// `bymissing' and `smissing' already dealt with;
 	//  ==> assume ALL observations in `touse' are to be used, whether missing or not
 	// hence use missing suboption to study() and by() here
-	cap nois admetan `invlist' if `touse', study(`_STUDY', m) by(`byopt') npts(`nptsopt') ///
-		effect(`effect') `eform' `logrank' `method' plotid(`plotid') `opts_ipdm' `rsample' `keepvars' ///
+	cap nois metan `invlist' if `touse', study(`_STUDY', m) by(`byopt') npts(`nptsopt') ///
+		effect(`effect') `eform' `summstat' `log' `logrank' plotid(`plotid') `rsample' `keepvars' ///
+		`keepall' `interaction' `extraline' `opts_ipdm' ///
 		///
-		/// /* extra admetan options, only relevant to ipdmetan; e.g. to prompt suitable display text: */
-		/// /*  [N.B. `admopts' also contains:  estexp(`estexp') explist(`explist') `interaction' ipdxline(`extraline') lrvlist(`lrvlist') ] */
-		ipdmetan(`admopts' use(`_USE') `byad' `sourceopt' `storedopt' `preserve')
-	
-	// N.B. `summstat' and `log' are *not* passed to -admetan-
-	//  as all the necessary info is already stored in `eform' and `effect'.
+		/// /* undocumented -metan- options, only relevant to -ipdmetan- */
+		ipdmetan use(`_USE') source(`_SOURCE') `estexp' `explist' `lrvlist' `preserve' `header'
 	
 	if _rc {
 		if `"`err'"'==`""' {
-			if _rc==1 nois disp as err `"User break in {bf:admetan}"'
-			else nois disp as err `"Error in {bf:admetan}"'
+			if _rc==1 nois disp as err `"User break in {bf:metan}"'
+			else nois disp as err `"Error in {bf:metan}"'
 		}
-		c_local err noerr		// tell ipdmetan not to also report an "error in {bf:admetan_setup}"
+		c_local err noerr		// tell -ipdmetan- not to also report an "error in {bf:metan_setup}"
 		exit _rc
 	}
 
@@ -3628,9 +3734,9 @@ end
 // Also conflicting options e.g. wmd and cohen have been tested for
 // and if e.g. cohen supplied alone, we have "summstat(smd)"
 
-// subroutine of admetan_setup
+// subroutine of metan_setup
 
-program define ProcessAD, rclass
+program define ProcessAD, sclass
 
 	syntax varlist(min=2 max=6 numeric) [if] [in], AD(string asis) ///
 		Study(string asis) [BY(string asis) USELIST(varlist) TVLIST(namelist) ///
@@ -3664,14 +3770,7 @@ program define ProcessAD, rclass
 	local ipdnpts    `npts'					// N.B. either contains `_NN' (if defined) or nothing
 	local ipdlogrank `logrank'
 	local ipd_iv = inlist(`params', 2, 3)  & "`logrank'"==""
-	
-	// Identify whether any -admetan- "stored variables" exist in the IPD
-	foreach x in _ES _seES _LCI _UCI _WT _NN _rsample {
-		cap confirm variable `x'
-		if !_rc local ipd_svlist `ipd_svlist' `x'
-	}
-
-	
+		
 	
 	***********************
 	* Prepare and load AD *
@@ -3684,11 +3783,13 @@ program define ProcessAD, rclass
 	if `"`lhs'"'!=`""' {
 		gettoken adfile lhs : lhs						// obtain `ADfile' as first word of `lhs'
 		if `"`adfile'"'!=`""' {							// check that `ADfile' is valid
-			my_prefix_savingIPD `adfile'				// Oct 2018: do this using a modified version of built-in _prefix_saving.ado
+			// my_prefix_savingIPD `adfile'				// Oct 2018: do this using a modified version of built-in _prefix_saving.ado
+			cap confirm file `adfile'					// Jan 2020: changed to simply use "confirm file"
 			local rc = _rc
 			if `rc' local lhs `"`adfile' `lhs'"'		// if it isn't, put `lhs' back together again to apply -syntax- later
 		}												// assume AD option (and -syntax-) is to be applied to data currently in memory
 	}
+	
 	
 	* If AD file exists, prepare data and load file
 	if `"`adfile'"'!=`""' & !`rc' {
@@ -3801,6 +3902,9 @@ program define ProcessAD, rclass
 		disp as err `"      all valid observations in the aggregate dataset will be included"' 
 		local study
 	}
+
+	local ns  : word count `ipd_slist'		// number of IPD studies
+	local nby : word count `ipd_bylist'		// number of IPD subgroups
 	
 	// If `study' not supplied or not found in AD file, assume entire dataset is to be used
 	// remove any observations with no (i.e. missing) data in `invlist'.
@@ -3817,46 +3921,47 @@ program define ProcessAD, rclass
 		qui replace `g' = . if `g' == 0		// set to missing for benefit of markout
 		markout `touse' `g'
 		drop `g'
+		
+		local smax : word `: word count `ipd_slist'' of `ipd_slist'	// max IPD study value
 	}
 	
 	// `study' might be string in AD file (as indeed it might have originally been in the IPD);
 	//   but if *numeric*, compare value labels and detect clashes
-	cap confirm numeric var `study'
-	if !_rc {
-		qui levelsof `study' if `touse', local(ad_slist) missing
-		local clash = cond(`"`: list ipd_slist & ad_slist'"'==`""', `""', "clash")		// clash in original IPD and AD study values; new label needed
-				
-		if "`clash'"!=`""' & `"`relabel'"'==`""' {
-			if `"`ipdstr'"'==`""' {
-				disp as err `"Study value label conflict between AD and IPD"'
-				disp as err `"If appropriate, use the {bf:relabel} suboption of {bf:ad()} to force relabelling of both AD and IPD"'
+	else {
+		cap confirm numeric var `study'
+		if !_rc {
+			qui levelsof `study' if `touse', local(ad_slist) missing
+			if `"`: list ipd_slist & ad_slist'"'!=`""' {	// clash in original IPD and AD study values; new label needed
+				if `"`relabel'"'==`""' {
+					if `"`ipdstr'"'==`""' {
+						disp as err `"Study value label conflict between AD and IPD"'
+						disp as err `"If appropriate, use the {bf:relabel} suboption of {bf:ad()} to force relabelling of both AD and IPD"'
+					}
+					else {
+						disp as err `"Study value label conflict between AD and IPD, due to {bf:study()} being converted from string in IPD."'
+						disp as err `"To avoid this conflict, supply a numeric (within IPD) variable to the {bf:study()} option;"'
+						disp as err `"  or to over-ride it, use the {bf:relabel} suboption of {bf:ad()} to force relabelling of both AD and IPD."'
+					}
+					exit 180
+				}
+				local smax : word `: word count `ipd_slist'' of `ipd_slist'	// max IPD study value
 			}
-			else {
-				disp as err `"Study value label conflict between AD and IPD, due to {bf:study()} being converted from string in IPD."'
-				disp as err `"To avoid this conflict, supply a numeric (within IPD) variable to the {bf:study()} option;"'
-				disp as err `"  or to over-ride it, use the {bf:relabel} suboption of {bf:ad()} to force relabelling of both AD and IPD."'
-			}
-			exit 180
+			else local smax = 0		// if `study' is numeric in AD with no clashes
 		}
+		else local smax = `ns'
 	}
-
+	
+	
 	* Now, create common labels for `study' and `by' across IPD and AD datasets
 	// (IPD is guaranteed numeric; AD may need to be converted from string) 
-
 	// N.B. `studylab' contains IPD study labels so far, but ultimately will contain both.
-	local ns  : word count `ipd_slist'		// number of IPD studies
-	local nby : word count `ipd_bylist'		// number of IPD subgroups
-	cap confirm numeric var `study'
-	if _rc local smax = `ns'
-	else local smax : word `: word count `ipd_slist'' of `ipd_slist'	// max IPD study value
-	
-	cap nois ProcessLabels if `touse', smax(`smax') nby(`nby') `relabel' ///
+	cap nois ProcessLabelsIPD if `touse', smax(`smax') nby(`nby') `relabel' ///
 		study(`study') newstudy(`_STUDY') newstudylab(`studylab') ///
 		by(`by_in_AD') newby(`_BY')       newbylab(`bylab')
 	if _rc {
-		if _rc==1 nois disp as err `"User break in {bf:admetan.ProcessLabels} when applied to AD"'
-		else if _rc!=2000 nois disp as err `"Error in {bf:admetan.ProcessLabels} when applied to AD"'
-		c_local err noerr			// tell admetan not to also report an "error in ProcessAD"
+		if _rc==1 nois disp as err `"User break in {bf:ipdmetan.ProcessLabels} when applied to AD"'
+		else if _rc!=2000 nois disp as err `"Error in {bf:ipdmetan.ProcessLabels} when applied to AD"'
+		c_local err noerr			// tell -ipdmetan- not to also report an "error in ProcessAD"
 		exit _rc
 	}
 	
@@ -3868,7 +3973,7 @@ program define ProcessAD, rclass
 		cap drop `_STUDY'						// "capture" since `_STUDY' might not exist
 		qui rename `r(newstudy)' `_STUDY'		// (N.B. can safely drop, since `_STUDY' can't be in lcols/rcols)
 	}
-	
+
 	// amended Feb 2018 due to local x = ... issue with version <13
 	// local adstudylab = cond(`"`r(newstudylab)'"'!=`""', `"`r(newstudylab)'"', `"`adstudylab'"')
 	// if `"`r(newstudylab)'"'!=`""' local adstudylab `r(newstudylab)'
@@ -3928,7 +4033,8 @@ program define ProcessAD, rclass
 		}
 		
 		// discard unwanted observations and variables from AD file, to save memory
-		if `"`lrcols'"'!=`""' {
+		local lrcols `lcols' `rcols'
+		if trim(`"`lrcols'"') != `""' {
 			qui ds
 			local dslist = r(varlist)
 			local lrcols : list lrcols & dslist		// identify vars in `lrcols' present in AD file
@@ -3937,14 +4043,7 @@ program define ProcessAD, rclass
 		cap sort `sortby'
 		qui keep `touse' `_STUDY' `by_in_AD' `adinvlist' `adnpts' `wgt' `adplotvar' `adcolvars' `lrcols'
 		qui gen byte `_USE' = 1
-		
-		// identify whether any -admetan- "stored variables" exist in the (processed) AD
-		foreach x in _ES _seES _LCI _UCI _WT _NN _rsample {
-			cap confirm variable `x'
-			if !_rc local ad_svlist `ad_svlist' `x'
-		}
-		local ad_svlist : list ad_svlist - ipd_svlist		// only those elements *NOT* in the IPD dataset
-		
+				
 	}	// end if `"`adfile'"'!=`""'
 	
 	else qui replace `_USE' = 1 if `touse'
@@ -3974,8 +4073,9 @@ program define ProcessAD, rclass
 			qui rename `adnpts' `npts'
 		}
 		else local npts `adnpts'		// hence, `npts' now either contains `adnpts' (if no `npts' in IPD), or `npts' from IPD, or nothing
-		return local npts `npts'		// (`adnpts' is not needed henceforth)
+		// local s_npts : copy local npts	// for sreturn (`adnpts' is not needed henceforth)
 	}
+	if "`npts'"!="" local npts_opt `"npts(`npts')"'		// for passing to -metan-
 
 	
 	
@@ -4070,7 +4170,8 @@ program define ProcessAD, rclass
 			local logstr = cond(`"`eform'"'==`""', `"log "', `""')
 			disp as err _n `"Note: Effects assumed to represent `logstr'Risk Ratios, due to 2x2 count data in {bf:ad()}"'
 			local summstat rr
-			local effect "`logstr'Risk Ratio"
+			// local effect "`logstr'Risk Ratio"
+			local effect "Risk Ratio"
 		}
 	}
 	else if `"`adlogrank'"'!=`""' {
@@ -4079,7 +4180,8 @@ program define ProcessAD, rclass
 			disp as err _n `"Note: Effects assumed to represent `logstr'Hazard Ratios, due to {bf:logrank} suboption in {bf:ad()}"' 
 		}
 		local summstat hr
-		local effect "`logstr'Haz. Ratio"
+		// local effect "`logstr'Haz. Ratio"
+		local effect "Haz. Ratio"
 	}
 		
 	// If data structures exactly match, simply rename advarlist to match with IPD
@@ -4144,7 +4246,7 @@ program define ProcessAD, rclass
 			disp as err `"      If in fact they should represent {it:O-E} and {it:V}, please supply the {bf:logrank} suboption to {bf:ad()}"' 
 			disp as err `"     (that is, in addition to the {bf:logrank} main option to {bf:ipdmetan})"' 
 		}
-		local method iv
+		// local method iv
 	}
 	
 	* Else one is I-V and the other is not (and structures are different)
@@ -4191,239 +4293,150 @@ program define ProcessAD, rclass
 	label define `sourcelab' 1 "IPD" 2 "Aggregate data"
 	label values `_SOURCE' `sourcelab'
 
-
-	* Next, determine whether -admetan- needs to be run on either IPD or AD
-	//  ultimately to enable entire dataset to be analysed together.
+	* If necessary, coerce non-IV data into IV format so that entire dataset to be analysed together.
 	// In either case, store *all* (old + new) I-V data under the varnames used by the *existing* I-V data.
 	// Then, set `invlist' to contain those varnames.
 	
-	// Case 0: Both are I-V, but one is _ES _seES (`params'==2) and the other is _ES _LCI _UCI (`params'==3)
-	if `ipd_iv' & `ad_iv' & `params'!=`adparams' {
-		if `adparams'==3 {
-			tokenize `invlist'
-			args ipd_ES ipd_seES
-			tokenize `adinvlist'
-			args ad_ES ad_LCI ad_UCI
-			qui replace `ipd_seES' = (`ad_UCI' - `ad_LCI') / (2*invnormal(.5 + 95/200)) if `_SOURCE'==2 & `touse'
-		}
-		else {
-			tokenize `adinvlist'
-			args ad_ES ad_seES
-			tokenize `invlist'
-			args ipd_ES ipd_LCI ipd_UCI
-			qui replace `ad_seES' = (`ipd_UCI' - `ipd_LCI') / (2*invnormal(.5 + 95/200)) if `_SOURCE'==1 & `_USE'==1
+	// Need to run -metan- here, both to coerce non-IV data,
+	//  but also to obtain numbers of studies and participants, and details of insufficient data
+	// Hence, if `invlist' or `adinvlist' contain _ES, _seES etc., 
+	//  rename them so that they are not overwritten by -metan-
+	local metanlist _ES _seES _LCI _UCI _WT _NN _rsample
+	local invlist2 : copy local invlist
+	local adinvlist2 : copy local adinvlist
+	foreach v of varlist `invlist' {
+		if `: list v in metanlist' {
+			tempvar temp`v'
+			qui rename `v' `temp`v''
+			local invlist2 = subinstr("`invlist2'", "`v'", "`temp`v''", .)
+			local adinvlist2 = subinstr("`adinvlist2'", "`v'", "`temp`v''", .)
 		}
 	}
-		
-	// Case 1: IPD is I-V; AD is not.
-	//  ==> run -admetan- on AD and copy results into `invlist'
-	else if `ipd_iv' & !`ad_iv' {
-		
-		tokenize `invlist'
-		if `params'==2 args old_ES old_seES
-		else args old_ES old_LCI old_UCI
-		
-		// If any variables named _ES, _seES, _LCI, _UCI, _WT or _NN exist in the dataset (AD or IPD)
-		// temp rename them to avoid being overwritten by -admetan-
-		cap confirm variable _ES
-		if !_rc {
-			tempvar temp_ES
-			qui rename _ES `temp_ES'
-			local rnlist _ES
+	foreach v of varlist `adinvlist2' {		// if any still to be done
+		if `: list v in metanlist' {
+			tempvar temp`v'
+			qui rename `v' `temp`v''
+			local adinvlist2 = subinstr("`adinvlist2'", "`v'", "`temp`v''", .)
 		}
-		local new_ES = cond("`old_ES'"=="_ES", "`temp_ES'", "`old_ES'")
-		local invlist2 `new_ES'
-		
-		cap confirm variable _seES
-		if !_rc {
-			tempvar temp_seES
-			qui rename _seES `temp_seES'
-			local rnlist `rnlist' _seES
-		}
-		local new_seES = cond("`old_seES'"=="_seES", "`temp_seES'", "`old_seES'")
-		local invlist2 `invlist2' `new_seES'
+	}
 
-		foreach x in _LCI _UCI {
-			cap confirm variable `x'
-			if !_rc {
-				tempvar temp`x'
-				qui rename `x' `temp`x''
-				local rnlist `rnlist' `x'
-			}
-			local new`x' = cond(`"`old`x''"'==`"`x'"', `"`temp`x''"', `"`old`x''"')
-			local invlist2 `invlist2' `new`x''
+	qui ds
+	local allvlist `"`r(varlist)'"'
+	local restvlist : list allvlist - invlist
+	local restvlist : list restvlist - adinvlist
+	foreach v of varlist `restvlist' {		// if any still to be done
+		if `: list v in metanlist' {
+			tempvar temp`v'
+			qui rename `v' `temp`v''
 		}
-
-		foreach x in _WT _rsample {	
-			cap confirm variable `x'
-			if !_rc {
-				tempvar temp`x'
-				qui rename `x' `temp`x''
-				local rnlist `rnlist' `x'
-			}
-		}
-		
-		cap confirm variable _NN
-		if !_rc {
-			tempvar temp_NN
-			qui rename _NN `temp_NN'
-			local rnlist `rnlist' _NN
-		}
-		local npts = cond("`npts'"=="_NN", "`temp_NN'", "`npts'")
-		local invlist2 `invlist2' `npts'
-		
-		cap admetan `adinvlist' if `_SOURCE'==2 & `touse', `adlogrank' npts(`npts') nogr noov nosu notab nohet
-		if _rc {
-			if _rc==1 nois disp as err `"User break in {bf:admetan}"' _c
-			else nois disp as err `"Error in {bf:admetan}"' _c
-			nois disp as err `" whilst converting aggregate data to inverse-variance format"'
-			exit _rc
-		}	
+	}
+	if "`npts'"=="_NN" {
+		local npts `temp_NN'
+		local npts_opt `"npts(`temp_NN')"'		// for passing to -metan-
+	}	
 	
-		// Copy newly-created data from _ES, _seES (or _LCI, _UCI) into IPD varnames (`invlist2')
-		tokenize `invlist2'		
-		qui replace `1' = _ES if `_SOURCE'==2 & `touse'
+	cap metan `invlist2' if `_SOURCE'==1 & `_USE'==1 & `touse', `logrank' `npts_opt' nograph
+	if _rc {
+		if _rc==1 nois disp as err `"User break in {bf:metan}"' _c
+		else nois disp as err `"Error in {bf:metan}"' _c
+		if !`ipd_iv' nois disp as err `" whilst converting IPD to inverse-variance format"'
+		else nois disp as err " "		// break the _c directive
+		exit _rc
+	}
+	local kIPD = r(k)
+	local nIPD = r(n)
+	summ _rsample, meanonly
+	assert `kIPD'==r(sum)
+	local kIPD_2 = r(N) - r(sum)		// _USE==2
+	if "`npts_opt'"!="" {
+		summ _NN, meanonly
+		if r(N) {						// added Aug 2020; `npts_opt' implies existence in IPD, not necessarily in AD
+			assert `nIPD'==r(sum)
+			summ _NN if _rsample, meanonly
+			local kIPD_2 = r(N)			// _USE==2
+		}
+	}
+	qui replace `_USE' = 2 if !_rsample & `_SOURCE'==1 & `_USE'==1 & `touse'
+
+	
+	** If appropriate, copy data from newly-created IPD vars _ES, _seES (or _LCI, _UCI) into AD varnames (`adinvlist2')
+	// NOTE: If IPD is logrank, we want -metan- to analyse OE & V
+	//  so that it prints "log Haz. Ratio"; "Peto log-rank" etc. on-screen.
+	// Hence, need to convert `adinvlist' to OE & V before passing on to -metan- for final analysis.
+	//  (Note that this didn't apply to the reverse procedure,
+	//    since if `ipdlogrank' is NOT specified, the analysis is not presented as logrank.)
+	if `ad_iv' & !`ipd_iv' & `"`logrank'"'==`""' {
+		tokenize `adinvlist2'
+		qui replace `1' = _ES if `_SOURCE'==1 & `_USE'==1 & `touse'
 		if `params'==2 {
-			qui replace `2' = _seES if `_SOURCE'==2 & `touse'
+			qui replace `2' = _seES if `_SOURCE'==1 & `_USE'==1 & `touse'
 		}
 		else {
-			qui replace `2' = _LCI if `_SOURCE'==2 & `touse'
-			qui replace `3' = _UCI if `_SOURCE'==2 & `touse'
+			qui replace `2' = _LCI if `_SOURCE'==1 & `_USE'==1 & `touse'
+			qui replace `3' = _UCI if `_SOURCE'==1 & `_USE'==1 & `touse'
 		}
-		if `"`npts'"'!=`""' {
-			local ++params
-			qui replace ``params'' = _NN if `_SOURCE'==2 & `touse'
-		}
-		
-		// Now rename back from tempnames to original names
-		//  *UNLESS* they only existed in the AD and not the IPD (in which case, let them be lost)
-		qui drop _ES _seES _LCI _UCI _WT _rsample
-		if `"`npts'"'!=`""' {
-			qui drop _NN
-		}
-		local rnlist : list rnlist - ad_svlist
-		foreach x of local rnlist {
-			qui rename `temp`x'' `x'
+		if `"`npts_opt'"'!=`""' {
+			qui replace `npts' = _NN if `_SOURCE'==1 & `_USE'==1 & `touse'
 		}
 	}
 	
-	// Case 2: AD is I-V; IPD is not.
-	//  ==> run -admetan- on IPD	
-	else if `ad_iv' & !`ipd_iv' {
-
-		tokenize `adinvlist'
-		
-		// If IPD is logrank, we want -admetan- to analyse OE & V
-		//  so that it prints "log Haz. Ratio"; "Peto log-rank" etc. on-screen.
-		// Hence, need to convert `adinvlist' to OE & V before passing on to -admetan- for final analysis.
-		//  (Note that this didn't apply to the reverse procedure,
-		//    since if `ipdlogrank' is NOT specified, the analysis is not presented as logrank.)
-		if `"`logrank'"'!=`""' {
-			if `adparams'==3 {
-				args ad_ES ad_LCI ad_UCI
-				tempvar ad_seES	
-				qui gen double `ad_seES' = (`ad_UCI' - `ad_LCI') / (2*invnormal(.5 + 95/200)) if `_SOURCE'==2 & `touse'
-			}
-			else args ad_ES ad_seES
-		
-			tokenize `invlist'
-			args oe v
-			qui replace `v'  = 1 / `ad_seES'^2 if `_SOURCE'==2 & `touse'
-			qui replace `oe' = `v' * `ad_ES'   if `_SOURCE'==2 & `touse'
-		}
-		
-		// Otherwise, carry out similar procedure to Case 1
-		else {
-			if `adparams'==2 args old_ES old_seES
-			else args old_ES old_LCI old_UCI
-		
-			// If any variables named _ES, _seES, _LCI, _UCI, _WT or _NN exist in the dataset (AD or IPD)
-			// temp rename them to avoid being overwritten by -admetan-
-			cap confirm variable _ES
-			if !_rc {
-				tempvar temp_ES
-				qui rename _ES `temp_ES'
-				local adrnlist _ES
-			}
-			local new_ES = cond("`old_ES'"=="_ES", "`temp_ES'", "`old_ES'")
-			local adinvlist2 `new_ES'
-
-			cap confirm variable _seES
-			if !_rc {
-				tempvar temp_seES
-				qui rename _seES `temp_seES'
-				local adrnlist `adrnlist' _seES
-			}
-			local new_seES = cond("`old_seES'"=="_seES", "`temp_seES'", "`old_seES'")
-			if `adparams'==2 local adinvlist2 `adinvlist2' `new_seES'
-
-			foreach x in _LCI _UCI {
-				cap confirm variable `x'
-				if !_rc {
-					tempvar temp`x'
-					qui rename `x' `temp`x''
-					local adrnlist `adrnlist' `x'
-				}	
-				local new`x' = cond(`"`old`x''"'==`"`x'"', `"`temp`x''"', `"`old`x''"')
-				if `adparams'==3 local adinvlist2 `adinvlist2' `new`x''
-			}
-			
-			foreach x in _WT _rsample {	
-				cap confirm variable `x'
-				if !_rc {
-					tempvar temp`x'
-					qui rename `x' `temp`x''
-					local adrnlist `adrnlist' `x'
-				}
-			}
-
-			cap confirm variable _NN
-			if !_rc {
-				tempvar temp_NN
-				qui rename _NN `temp_NN'
-				local adrnlist `adrnlist' _NN
-			}
-			local npts = cond("`npts'"=="_NN", "`temp_NN'", "`npts'")
-			local adinvlist2 `adinvlist2' `npts'
-
-			cap admetan `invlist' if `_SOURCE'==1 & `_USE'==1, `logrank' npts(`npts') nogr noov nosu notab nohet
-			if _rc {
-				if _rc==1 nois disp as err `"User break in {bf:admetan}"' _c
-				else nois disp as err `"Error in {bf:admetan}"' _c
-				nois disp as err `" whilst converting IPD to inverse-variance format"'
-				exit _rc
-			}
-
-			// Copy newly-created data from _ES, _seES (or _LCI, _UCI) into varnames (`adinvlist2')
-			tokenize `adinvlist2'
-			qui replace `1' = _ES if `_SOURCE'==1 & `_USE'==1
-			if `params'==2 {
-				qui replace `2' = _seES if `_SOURCE'==1 & `_USE'==1
-			}
-			else {
-				qui replace `2' = _LCI if `_SOURCE'==1 & `_USE'==1
-				qui replace `3' = _UCI if `_SOURCE'==1 & `_USE'==1
-			}		
-			if `"`npts'"'!=`""' {
-				local ++params
-				qui replace ``params'' = _NN if `_SOURCE'==1 & `_USE'==1
-			}
-		
-			// Now rename back from tempnames to original names
-			//  *UNLESS* they only existed in the AD and not the IPD (in which case, let them be lost)
-			qui drop _ES _seES _LCI _UCI _WT _rsample
-			if `"`npts'"'!=`""' {
-				qui drop _NN
-			}
-			local adrnlist : list adrnlist - ad_svlist
-			foreach x of local adrnlist {
-				qui rename `temp`x'' `x'
-			}
-		}
-		
-		local invlist = cond(`"`logrank'"'!=`""', `"`oe' `v'"', `"`adinvlist'"')
+	cap metan `adinvlist2' if `_SOURCE'==2 & `_USE'==1 & `touse', `adlogrank' `npts_opt' nograph
+	if _rc {
+		if _rc==1 nois disp as err `"User break in {bf:metan}"' _c
+		else nois disp as err `"Error in {bf:metan}"' _c
+		if !`ad_iv' nois disp as err `" whilst converting aggregate data to inverse-variance format"'
+		else nois disp as err " "		// break the _c directive
+		exit _rc
 	}
+	local kAD = r(k)
+	local nAD = r(n)
+	summ _rsample, meanonly
+	assert `kAD'==r(sum)
+	local kAD_2 = r(N) - r(sum)		// _USE==2
+	if "`npts_opt'"!="" {
+		summ _NN, meanonly
+		if r(N) {						// added Aug 2020; `npts_opt' implies existence in IPD, not necessarily in AD
+			assert `nAD'==r(sum)
+			summ _NN if _rsample, meanonly
+			local kAD_2 = r(N)			// _USE==2
+		}
+	}
+
+	// If IPD is logrank (see explanation above)
+	if `ad_iv' & !`ipd_iv' & `"`logrank'"'!=`""' {
+		tokenize `invlist2'
+		args oe v
+		qui replace `v'  = 1 / _seES^2 if `_SOURCE'==2 & `_USE'==1 & `touse'
+		qui replace `oe' = `v' * _ES   if `_SOURCE'==2 & `_USE'==1 & `touse'
+	}
+	qui replace `_USE' = 2 if !_rsample & `_SOURCE'==2 & `_USE'==1 & `touse'
 	
+	// Else, if appropriate, copy newly-created data from _ES, _seES (or _LCI, _UCI) into IPD varnames (`invlist2')
+	if !`ad_iv' & `ipd_iv' {
+		tokenize `invlist2'
+		qui replace `1' = _ES if `_SOURCE'==2 & `_USE'==1 & `touse'
+		if `params'==2 {
+			qui replace `2' = _seES if `_SOURCE'==2 & `_USE'==1 & `touse'
+		}
+		else {
+			qui replace `2' = _LCI if `_SOURCE'==2 & `_USE'==1 & `touse'
+			qui replace `3' = _UCI if `_SOURCE'==2 & `_USE'==1 & `touse'
+		}
+		if `"`npts_opt'"'!=`""' {
+			qui replace `npts' = _NN if `_SOURCE'==2 & `_USE'==1 & `touse'
+		}
+	}
+		
+	// Now rename back from tempnames to original names
+	foreach v in `metanlist' {
+		cap drop `v'
+		cap confirm variable `temp`v''
+		if !_rc {
+			qui rename `temp`v'' `v'
+		}
+	}
+	local npts = cond("`npts'"=="`temp_NN'", "_NN", "`npts'")
+
 	
 	** Sort out various permutations of _BY
 	
@@ -4456,23 +4469,43 @@ program define ProcessAD, rclass
 		label variable `_BY' `"`byvarlab'"'
 		label values `_BY' `bylab'
 	}
-	else if `"`byad'"'!=`""' local _BY `_SOURCE'
+	
+	// If `byad', generate _BY variable which is a clone of _SOURCE
+	else if `"`byad'"'!=`""' {
+		qui gen byte `newby' = `_SOURCE'
+		label copy `sourcelab' `newbylab'
+		label values `newby' `newbylab'
+		label variable `newby' "Data source"
+		local _BY `newby'
+	}
 	
 	// Sort by source
 	tempvar obs
 	qui gen long `obs' = _n
 	sort `_SOURCE' `_USE' `obs'
-
+	
 	// Return values
-	return local invlist  `invlist'
-	return local by       `_BY'
-	return local byad     `byad'
-	return local eform    `eform'
-	return local effect   `"`effect'"'
-	return local logrank  `logrank'
-	return local method   `method'
-	return local summstat `summstat'
+	sreturn clear
+	sreturn local invlist  `invlist'
+	sreturn local nptsvar  `npts'
+	sreturn local by       `_BY'
+	sreturn local byad     `byad'
+	sreturn local eform    `eform'
+	sreturn local effect `"`effect'"'
+	sreturn local logrank  `logrank'
+	// sreturn local method   `method'
+	sreturn local summstat `summstat'
 
+	sreturn local kIPD `kIPD'
+	sreturn local nIPD `nIPD'
+	sreturn local kIPD_2 `kIPD_2'
+	sreturn local nIPD_2 `nIPD_2'
+	
+	sreturn local kAD `kAD'
+	sreturn local nAD `nAD'
+	sreturn local kAD_2 `kAD_2'
+	sreturn local nAD_2 `nAD_2'
+	
 end
 
 
@@ -4502,7 +4535,8 @@ end
 
 * Program to process `study' and `by' labels
 // based on earlier ProcessAD.ado but altered quite a bit
-// (called from within ProcessAD subroutine)
+// (called from within ProcessAD subroutine;
+//    named ProcessLabelsIPD to differentiate from similar subroutine in metan.ado)
 
 // Two functions:
 
@@ -4512,11 +4546,11 @@ end
 // 2. If `study' and/or `by' are numeric, and `newstudylab' and/or `newbylab' *are* defined already
 //   then add values of `study' and `by' onto existing `newstudylab' and/or `newbylab' (exiting with error if not possible).
 
-program define ProcessLabels, rclass sortpreserve
+program define ProcessLabelsIPD, rclass sortpreserve
 
 	syntax [if] [in], NEWSTUDY(name) [NEWSTUDYLAB(name) STUDY(name) SMAX(integer 0) ///
 		NEWBY(name) NEWBYLAB(name) BY(name) NBY(integer 0) /*BYAD*/ RELabel]
-			 
+	
 	// First, test for *existence* of `study' and `by' in current data
 	cap confirm variable `study'
 	if _rc local study
@@ -4543,7 +4577,7 @@ program define ProcessLabels, rclass sortpreserve
 	
 	** Subgroup (`by') labelling (if applicable)
 	// N.B. do this first, in case `by' is string and contains missings. Stata sorts string missings to be *first* rather than last.
-	// If IPD alone, ProcessLabels will never be run.
+	// If IPD alone, ProcessLabelsIPD will never be run.
 	// If AD alone, no need for a new variable (`newby') unless `by' is string, but tempvar is set just in case
 	// If IPD+AD, `by' contains the AD by-var and `newby' contains "_BY" (i.e. the name of the var used in IPD, with label `newbylab')
 	if `"`by'"'!=`""' {
@@ -4557,8 +4591,6 @@ program define ProcessLabels, rclass sortpreserve
 			qui bysort `touse' `by' : gen long `bygroup' = (_n==1) if `touse'
 			qui bysort `touse' : replace `bygroup' = sum(`bygroup') if `touse'
 			local nby = `bygroup'[_N]		// this will be in `touse' since (a) we know at least one obs is `touse'; (b) `touse' is sorted so zeros come first.
-			
-			nois disp `nby'
 			
 			sort `obs'
 			forvalues i=1/`nby' {
@@ -4601,7 +4633,7 @@ program define ProcessLabels, rclass sortpreserve
 		}
 		
 		// else, still need `newby' for subequent code
-		else local newby `by'		
+		else local newby `by'
 		
 	}	// end if `"`by'"'!=`""'
 	else local newby
@@ -4657,21 +4689,22 @@ program define ProcessLabels, rclass sortpreserve
 			else {
 				local si_old = `study'[`=`i' + `offset' - 1']
 				if !`rc' {
-					local si_new = cond(`smax', `i' + `smax', `si_old')		// numeric
+					local si_new = cond(`smax', `i' + `smax', `si_old')		// if numeric
 				}
 			
 				// if `study' is numeric and labelled, copy `study' value labels across to `newstudylab'
 				// (offset by `smax' if `relabel', o/w not)
-				if !`rc' {
+				if !`rc' & `"`: value label `study''"'!=`""' {
 					cap assert `"`: label `newstudylab' `si_new''"'==`"`: label (`study') `si_old''"'	// if label is already defined correctly, don't attempt to re-label
 					if _rc label define `newstudylab' `si_new' `"`: label (`study') `si_old''"', add
 				}
 				
 				// if `study' is string, put `study' strings into `newstudylab' values (offset by `smax')
+				// similarly, if `study' is numeric but unlabelled, store raw values in `newstudylab'
 				else {
-					cap assert `"`: label `newstudylab' `si_new''"'==`"`si_old'"'	// if label is already defined correctly, don't attempt to re-label
-					if _rc label define `newstudylab' `si_new' `"`si_old'"', add
-				}
+					cap assert `"`: label `newstudylab' `si_new''"'==`"`si_old'"'			// if label is already defined correctly, don't attempt to re-label
+					if _rc cap label define `newstudylab' `si_new' `"`si_old'"', add		// Aug 2020: "cap" added for numeric-but-unlabelled `study' ...
+				}																			// ... since `newstudylab' may already exist with pre-defined study labels
 			}
 		}
 
