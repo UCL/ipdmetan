@@ -34,10 +34,12 @@
 // no changes to code; upversioned to match admetan/ipdmetan
 // but a minor change to text in the help file
 
-*! version 4.0  David Fisher  25nov2020
+* version 4.00  David Fisher  25nov2020
 // no changes to code, other than adding check that -metan- v4.0+ is installed; upversioned to match metan/ipdmetan
 // some changes to text in the help file
 
+*! version 4.01  David Fisher  12feb2021
+// no changes to code; upversioned to match with -ipdmetan-
 
 
 program define ipdover, rclass

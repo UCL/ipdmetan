@@ -117,13 +117,17 @@
 // GetNewname adds an extra underscore where `newname' matches _[A-Z] (and hence would o/w be caught by "badnames")
 // Fixed bugs preventing help file examples from running
 
-*! version 4.0  David Fisher  25nov2020
+* version 4.00  David Fisher  25nov2020
 // call -metan- version 4.00 rather than -admetan-
 // from now on, -metan- v4.00+ is required ... also check for latest version of -metan- and display message if update required
 // added undocumented `force' option to allow "deluded" interaction analysis (see Fisher et al BMJ 2017)
 // moved even more code out of -(ad)metan- and into here
 // fixed bug in "collapse-based syntax" with binary outcome which meant -(ad)metan- called with RR even if user specified OR
 
+*! version 4.01  David Fisher  12feb2021
+// minor updates only:
+// - "study()" format now honoured whether numeric or string
+// - slight change to parsing of "extraline(on|off)" to match with -metan-
 
 
 program define ipdmetan, rclass
@@ -276,11 +280,19 @@ program define ipdmetan, rclass
 		if `overlen'>1 {
 			disp as err "{bf:study()} should only contain a single variable name"
 			exit 198
-		}	
+		}
 		qui count if `touse'
 		if !r(N) {
 			nois disp as err "no valid observations in {bf:study()}"
 			exit 2000
+		}
+		
+		// ADDED DEC 2020:
+		local studyfmt : format `study'
+		cap confirm string variable `study'
+		if !_rc {
+		    local sfmtlen = fmtwidth("`studyfmt'")
+		    local studyfmt "%`sfmtlen'.0g"
 		}
 	}
 		
@@ -427,13 +439,12 @@ program define ipdmetan, rclass
 		Over(string)              /// for error-trapping only
 		/// Options mostly relevant to forestplot, but also needed beforehand
 		LCols(string asis) RCols(string asis) PLOTID(string) COUNTS(passthru) ///
-		/*CUmulative INFluence RFDist EFFIcacy OEV COUNTS(passthru)*/ /// for "badnames"
-		noGRaph noHET noWT noEXTRALine ///
+		noGRaph noHET noWT EXTRALINE(string) ///
 		/// Undocumented options
 		ZTOL(passthru)            /// ztol = tolerance for z-score (abs(ES/seES))
 		* ]                       // Remaining options will be passed through to -metan-
 
-	local extraline = cond("`extraline'"!="", "no", "")			// for clarity later
+	// local extraline = cond("`extraline'"!="", "no", "")			// for clarity later
 	local sgwt = cond("`sgweight'"!="", "sgwt", "`sgwt'")		// sgweight is a synonym (for compatibility with metan.ado)
 	local opts_ipdm = trim(`"`macval(options)' `counts' `sgwt'"')
 
@@ -1359,6 +1370,7 @@ program define ipdmetan, rclass
 		confirm numeric var _STUDY
 		label values  _STUDY `vallab1'
 		label variable _STUDY `"`svarlab'"'
+		format _STUDY `studyfmt'				// ADDED DEC 2020
 		
 		cap nois metan_setup `outvlist', study(`studyopt') by(`byopt') citype(`citype') ///
 			effect(`effect') df(`_df') wgt(`wgtvar') `eform' `log' ///
@@ -1868,7 +1880,7 @@ program define ParseFPlotOpts, sclass
 	local 0 `", `options'"'
 	syntax [, noGRaph noHET noOVerall noSUbgroup noWARNing noWT noSTATs ///
 		EFFect(string asis) COUNTS(string asis) ///
-		HETStat(passthru) PLOTID(passthru) LCols(passthru) RCols(passthru) SWitch(passthru) ///
+		HETStat(passthru) PLOTID(passthru) LCols(passthru) RCols(passthru) EXTRALINE(passthru) ///
 		OVWt SGWt SGWEIGHT CUmulative INFluence INTERaction EFFIcacy RFDist RFLevel(passthru) ///
 		COUNTS2 GROUP1(passthru) GROUP2(passthru) * ]
 
@@ -1916,8 +1928,8 @@ program define ParseFPlotOpts, sclass
 	** Now parse "forestplot options" if applicable
 	local optlist1 graph het overall subgroup warning wt stats ovwt sgwt
 	local optlist1 `optlist1' cumulative efficacy influence interaction rfdist		// "stand-alone" options
-	local optlist2 /*effect*/ plotid hetstat rflevel counts							// options requiring content within brackets
-	local optlist3 lcols rcols switch												// options which cannot conflict
+	local optlist2 /*effect*/ plotid hetstat rflevel counts extraline				// options requiring content within brackets
+	local optlist3 lcols rcols														// options which cannot conflict
 	
 	if `"`forestplot'"'!=`""' {
 	
@@ -1926,17 +1938,32 @@ program define ParseFPlotOpts, sclass
 		local optlist `optlist1' `optlist2' `optlist3' effect
 		foreach opt of local optlist {
 			local `opt'_main : copy local `opt'
+			local `opt'
 		}
 		
 		// (Note 23rd May 2018: noextraline is a forestplot() suboption only,
 		//   but is unique in that it is needed *only* by -metan.BuildResultsSet- and *not* by -forestplot-)
+		// ^^ noextraline is now a legacy option, only included for backwards compatibility
+		//    extraline(yes | no) is the preferred syntax
 		local 0 `", `forestplot'"'
 		syntax [, noGRaph noHET noOVerall noSUbgroup noWARNing noWT noSTATs ///
 			EFFect(string asis) COUNTS(string asis) ///
-			HETStat(passthru) PLOTID(passthru) LCols(passthru) RCols(passthru) SWitch(passthru) ///
+			HETStat(passthru) PLOTID(passthru) LCols(passthru) RCols(passthru) EXTRALINE2(string) ///
 			OVWt SGWt SGWEIGHT CUmulative INFluence INTERaction EFFIcacy RFDist RFLevel(passthru) ///
 			COUNTS2 GROUP1(passthru) GROUP2(passthru) noEXTRALine * ]
 
+		if `"`extraline'"'!=`""' {
+		    if `"`extraline2'"'!=`""' {
+				nois disp as err `"Only one of {bf:extraline()} and {bf:noextraline} is allowed"'
+				exit 198
+			}
+			local extraline2 "no"
+		}
+		local extraline : copy local extraline2
+		if `"`extraline'"'!=`""' {
+			local extraline `"extraline(`extraline')"'
+		}
+			
 		local opts_fplot `"`macval(options)'"'
 		local sgwt = cond("`sgweight'"!="", "sgwt", "`sgwt'")		// sgweight is a synonym (for compatibility with metan.ado)
 		local sgweight
@@ -2037,7 +2064,7 @@ program define ParseFPlotOpts, sclass
 
 	sreturn local options     `"`macval(opts_main)'"'
 	sreturn local opts_fplot  `"`macval(opts_fplot)'"'
-	sreturn local opts_parsed `"`macval(opts_parsed)' `extraline'"'
+	sreturn local opts_parsed `"`macval(opts_parsed)'"'
 	
 end
 
