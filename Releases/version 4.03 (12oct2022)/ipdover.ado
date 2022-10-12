@@ -14,9 +14,11 @@
 * version 4.02  David Fisher  20apr2021
 // no changes to code; upversioned to match with -ipdmetan-
 
-*! version 4.03  David Fisher  29nov2021
+*! version 4.03  David Fisher  12oct2022
 // Added "clear" (and undocumented "clearstack") options
 // Added prefix() option so that saved variables are `prefix'_ES etc.
+// Fixed bug which made "No. pts" column appear in forestplot with r-class commands even if not explicitly specified (displaying all missing values)
+// (note however that a column of missing values DOES still appear on-screen, as a prompt to the user.)
 
 
 program define ipdover, rclass
@@ -40,8 +42,7 @@ program define ipdover, rclass
 			nois disp as err "Please check, and consider updating {bf:metan}"
 		}
 	}
-	
-	
+
 	
 	// ipdmetan has two possible syntaxes:
 	
@@ -145,6 +146,7 @@ program define ipdover, rclass
 	local lcols     `"`r(lcols)'"'
 	local rcols     `"`r(rcols)'"'
 	local wt        `r(wt)'				// returned separately from ipdmetan.ado rather than sending straight to forestplot
+	local nonbeta   `r(nonbeta)'		// Added Mar 2022
 	local opts_fplot `"`r(opts_fplot)'"'
 
 	return local citype `citype'
@@ -174,12 +176,7 @@ program define ipdover, rclass
 	forvalues h=1/`overlen' {
 		local varlab`h' `"`r(varlab`h')'"'
 	}
-	
-	local outvlist `prefix'_ES `prefix'_seES `prefix'_LCI `prefix'_UCI `prefix'_NN		// permanent vars, not tempvars
-	tokenize `outvlist'
-	args _ES _seES _LCI _UCI _NN
-	local _USE `prefix'_USE
-	
+		
 	// Now parse options (either originally specified to -ipdover-, or returned by -ipdmetan-
 	local 0 `", `r(options)'"'
 	syntax [, noOVerall noSUbgroup SUMMARYONLY noTABle KEEPAll KEEPOrder ///
@@ -198,6 +195,30 @@ program define ipdover, rclass
 			exit _rc
 		}
 	}
+	
+	// use locals to avoid referring to `prefix' going forward
+	// and thereby simplify code [July 2022]
+	local outvlist `prefix'_ES `prefix'_seES `prefix'_LCI `prefix'_UCI `prefix'_NN		// permanent vars, not tempvars
+	tokenize `outvlist'
+	args _ES _seES _LCI _UCI _NN
+	local _USE `prefix'_USE
+	
+	// markers of existence of _BY and _OVER
+	// N.B. only _LEVEL is guaranteed to exist.
+	// _OVER will only exist if `overlen'>1 (i.e. if there is a need to distinguish)
+	local _BY
+	cap confirm var `prefix'_BY
+	if !_rc local _BY `prefix'_BY
+	
+	local _OVER
+	cap confirm var `prefix'_OVER
+	if !_rc local _OVER `prefix'_OVER
+
+	local _LEVEL `prefix'_LEVEL
+	local _LABELS `prefix'_LABELS
+
+	cap confirm numeric var `prefix'_WT
+	if !_rc local _WT `prefix'_WT
 	
 	
 	** If raw data, more processing is required to obtain _ES, _seES, _LCI and _UCI
@@ -252,7 +273,6 @@ program define ipdover, rclass
 	}
 	else if _rc qui gen double `_UCI' = .	
 
-	
 	// Generate confidence limit values if necessary
 	// v2.1: ifstmt completely recoded to avoid need for "assert" within GenConfInts
 	// (N.B. only one of _LCI, _UCI needs to be missing for GenConfInts to be run)
@@ -290,21 +310,7 @@ program define ipdover, rclass
 	
 	
 	** Finish off: return stats & matrices; print to screen; saving/forestplot
-	
-	// markers of existence of _BY and _OVER
-	// N.B. only _LEVEL is guaranteed to exist.
-	// _OVER will only exist if `overlen'>1 (i.e. if there is a need to distinguish)
-	local _BY
-	cap confirm var `prefix'_BY
-	if !_rc local _BY `prefix'_BY
-	
-	local _OVER
-	cap confirm var `prefix'_OVER
-	if !_rc local _OVER `prefix'_OVER
-
-	local _LEVEL `prefix'_LEVEL
-	local _LABELS `prefix'_LABELS
-	
+		
 	// need to sort before forming matrix
 	// missing values in _BY may cause problems, so need to be careful!
 	summ `_USE', meanonly
@@ -315,8 +321,6 @@ program define ipdover, rclass
 	local notuse5 = cond("`use5'"=="", "", `"*(!`use5')"')
 		
 	// return matrix of coefficients
-	cap confirm numeric var `prefix'_WT
-	if !_rc local _WT `prefix'_WT
 	tempname coeffs
 	sort `use5' `_BY' `_OVER' `tempuse' `_LEVEL'
 	mkmat `_OVER' `_BY' `_LEVEL' `_ES' `_seES' `_WT' `_NN' if inlist(`_USE', 1, 2), matrix(`coeffs')
@@ -724,24 +728,29 @@ program define ipdover, rclass
 		** Save _dta characteristic containing all the options passed to -forestplot-
 		// so that they may be called automatically using "forestplot, useopts"
 		// (N.B. _USE, _LABELS and _NN should always exist)
-		confirm var `_NN'
-		local wgtvar = cond("`_WT'"!="", "`_WT'", "`_NN'")	// `wgtvar' contains `_WT' (i.e. user-defined weights) if supplied; o/w _NN
-		local wgtopt wgt(`wgtvar')
 		
-		if `"`wt'"'!=`""' local `wgtvar'	// i.e. clear either `_WT' or `_NN' depending on which is the weighting variable
-		if `"`_WT'"'!=`""' local _NN		// clear `_NN' anyway if user-defined weights
+		// Modified Mar 2022
+		if `"`nonbeta'"'==`""' local wgtvar `_NN'
+		if `"`_WT'"'!=`""' local wgtvar `_WT'			// user-defined weights, if supplied
+		if `"`wgtvar'"'!=`""' {							// -ifstmt- is in case of `nonbeta' (see -ipdmetan- )
+			local wgtopt wgt(`wgtvar')
+			if `"`wgtvar'"'==`"`_NN'"' local _NNopt `_NN'	// include _NN in lcols if wgtvar, but *don't* include user-spec _WT in rcols
+		}
+		// end of modified section
 		
 		local useopts `"use(`_USE') labels(`_LABELS') `wgtopt' nowt `eform' effect(`effect') `keepall' `opts_fplot'"'
 		if `"`_BY'"'!=`""'    local useopts `"`macval(useopts)' by(`_BY')"'
-		if trim(`"`lcols' `_NN' `countsvl' `_OE' `_V'"')!=`""' {
-			local useopts `"`macval(useopts)' lcols(`lcols' `_NN' `countsvl' `_OE' `_V')"'
+		if trim(`"`lcols' `_NNopt' `countsvl' `_OE' `_V'"')!=`""' {
+			local useopts `"`macval(useopts)' lcols(`lcols' `_NNopt' `countsvl' `_OE' `_V')"'
 		}
 		if trim(`"`_VE' `_WT' `rcols'"')!=`""' {
 			local useopts `"`macval(useopts)' rcols(`_VE' `_WT' `rcols')"'
 		}
 		if `"`_WT'"'!=`""' local fpnote `"NOTE: Weights are user-defined"'
-		else local fpnote `"NOTE: Weighting is by sample size"'		
-		local useopts = trim(itrim(`"`macval(useopts)' note(`fpnote')"'))
+		else if `"`_NNopt'"'!=`""' local fpnote `"NOTE: Weighting is by sample size"'
+		if `"`fpnote'"'!=`""' {
+			local useopts = trim(itrim(`"`macval(useopts)' note(`fpnote')"'))
+		}
 		
 		// Store data characteristics
 		// June 2016: in future, could maybe add other warnings here, e.g. continuity correction??

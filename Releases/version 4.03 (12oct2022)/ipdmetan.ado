@@ -19,10 +19,12 @@
 // "interaction" and "forestplot(interaction)" now have slightly different interpretations
 // Bug fixes:  counting patients when IPD+AD, and displaying text to screen r.e. studies with insufficient data
 
-*! version 4.03  David Fisher  29nov2021
+*! version 4.03  David Fisher  12oct2022
 // Added "clear" (and undocumented "clearstack") options
-// Added prefix() option so that saved variables are `prefix'_ES etc.
 // Fixed bug preventing running with prefix "mi estimate, post :"
+// Note: prefix() option added to -metan- and -ipdover-, but usage within ipdmetan.ado is minimal
+
+
 
 program define ipdmetan, rclass
 
@@ -38,16 +40,20 @@ program define ipdmetan, rclass
 	return `hidden' local ipdmetan_version "4.03"
 	
 	// Check that -metan- v4.0+ is installed
+	local createdby createdby(ipdmetan)
 	cap metan
 	if `"`r(metan_version)'"'==`""' {
 		nois disp as err `"This version of {bf:ipdmetan} requires version 4.00 or higher of {bf:metan}"'
 		exit 499
 	}
 	else {
-		local current_version = 4.05
+		local current_version = 4.06
 		if `r(metan_version)' < `current_version' {
-			disp `"{error}{bf:metan} version "' as res `r(metan_version)' as err `" may not the most recent version available"'
+			disp `"{error}{bf:metan} version "' as res %4.02f `r(metan_version)' as err `" may not be the most recent version available"'
 			disp `"{error}Please check, and consider updating {bf:metan}"'
+			
+			// Sep 2022: prevent error in -forestplot- arising from use of older (4.00 to 4.02) versions of -metan-
+			if `r(metan_version)' < 4.03 local createdby
 		}
 	}
 	
@@ -108,6 +114,7 @@ program define ipdmetan, rclass
 			exit _rc
 		}
 		local cmdname `s(cmdname)'
+		local pcommand  `"`s(pcommand)'"'
 		local cmdbefore `"`s(cmdbefore)'"'
 		local cmdafter  `"`s(cmdafter)'"'
 		local cmdifin   `"`s(cmdifin)'"'
@@ -145,7 +152,7 @@ program define ipdmetan, rclass
 		if "`cmdstruc'" == "generic" {
 			nois disp as err `"Syntax {bf:1.} detected, "' _c
 			if `rc'==101 nois disp as err `"so {it:varlist} cannot be given before the colon."'
-			else nois disp as err `"so [{it:if}] [{it:in}] cannot be given before the colon."'
+			else nois disp as err `"so [{it:if}] [{it:in}] and weights cannot be given before the colon."'
 		}
 		else if "`cmdstruc'" == "specific" {
 			nois disp as err `"Syntax {bf:2.} detected, "' _c
@@ -315,7 +322,8 @@ program define ipdmetan, rclass
 			local sortby = cond("`sortby'"=="_n", "", "`sortby'")
 			cap nois metan_setup `invlist' if `touse', study(`studyopt') by(`byopt') ///
 				sortby(`sortby') ad(`ad') forestplot(`opts_fplot') ///
-				effect(`effect') summstat(`summstat') `eform' `log' `clear' `clearstack' `opts_ipdm'
+				effect(`effect') summstat(`summstat') `eform' `log' ///
+				`clear' `clearstack' `createdby' `opts_ipdm'
 
 			if _rc {
 				if `"`err'"'==`""' {
@@ -544,20 +552,13 @@ program define ipdmetan, rclass
 		}
 	}
 	else local svarlab `"`r(varlab1)'"'
-	/*
-		{
-		// If IPD+AD, we may also need to know if `study' was originally (i.e. in IPD) string: this is `ipdstr'
-		if `"`ad'"'!=`""' {
-			local ipdstr = cond(trim(`"`study'"') == trim(`"`r(study)'"'), "", "ipdstr")
-			local ad `"`ad' `ipdstr'"'
-		}
-		local svarlab `"`r(varlab1)'"'
-	}
-	// OCT 2018: Do we need to know `ipdstr' at all??
-	
-	*/	
+
 	local studylist `r(study)'			// contains de-coded string vars if present (`study' still contains original varname)
-	local _STUDY = cond(`"`ipdover'"'!=`""', `"`prefix'_LEVEL"', `"`prefix'_STUDY"')
+	if `"`ipdover'"'!=`""' {
+		local prefixopt `prefix' 
+		local _STUDY `prefix'_LEVEL
+	}
+	else local _STUDY _STUDY
 
 
 	
@@ -697,6 +698,7 @@ program define ipdmetan, rclass
 			local statsr `"`statsr' e(df_r)"' 
 			local namesr `"`namesr' `_df'"'
 		}
+		if `"`_df'"'!=`""' local dfopt df(`_df')	// Jun 2022
 	}
 	
 	// 11th June 2017
@@ -725,6 +727,8 @@ program define ipdmetan, rclass
 			local statsr `"`statsr' `wgt'"'
 			local namesr `"`namesr' `wgtvar'"'
 		}
+		
+		local wgtopt wgt(`wgtvar')		// Jun 2022
 	}
 	
 	// Moved downwards 17th July 2017
@@ -815,14 +819,17 @@ program define ipdmetan, rclass
 		// if "`ipdover'"!="", need to pass something to CommandLoop's studyid() option (as a convenience only)
 		//  but we don't want to confuse this with `StudyID' as declared for "`ipdover'"=="" (as that will actually be needed).
 		//  so use a different tempvar name.
-		if `"`ipdover'"'!=`""' tempvar OverID
-		local studyidopt = cond(`"`ipdover'"'!=`""', `"`OverID'"', `"`StudyID'"')
+		local studyidopt `StudyID'
+		if `"`ipdover'"'!=`""' {
+			tempvar OverID
+			local studyidopt `OverID'
+		}
 		
 		cap nois `version' CommandLoop `exp_list' if `touse', ///
-			cmdname(`cmdname') cmdbefore(`cmdbefore') cmdafter(`cmdafter') ///
+			pcommand(`pcommand') cmdname(`cmdname') cmdbefore(`cmdbefore') cmdafter(`cmdafter') ///
 			sortby(`obs') study(`studylist', `smissing') studyid(`studyidopt') ipdfile(`ipdfile') poolvar(`poolvar') ///
-			by(`_BY') `ipdover' `interaction' `overallopt' `subgroup' `total' `rsample' prefix(`prefix') ///
-			overlen(`overlen') `overtype' statsr(`statsr') namesr(`namesr') `level' `messages' `ztol' `strata_opt'
+			by(`_BY') `ipdover' `interaction' `overallopt' `subgroup' `total' `rsample' ///
+			overlen(`overlen') `overtype' statsr(`statsr') namesr(`namesr') `level' `messages' `ztol' `strata_opt' prefix(`prefixopt')	// only pass `prefix' to CommandLoop if -ipdover-
 			
 		if _rc {
 			if `"`err'"'==`""' {
@@ -836,8 +843,9 @@ program define ipdmetan, rclass
 		local n = r(n)
 		local estexp `r(estexp)'
 		return local estexp `estexp'
+		return local nonbeta `r(nonbeta)'	// Added Mar 2022
 
-		local outvlist `prefix'_ES `prefix'_seES
+		local outvlist _ES _seES
 		preserve
 		
 	}		// end if "`cmdstruc'"=="generic"
@@ -1057,7 +1065,7 @@ program define ipdmetan, rclass
 				if `"`cmdstruc'"'==`"specific"' {
 					cap nois ProcessRawData `invlist' if `touse', ///
 						study(`overh') by(`_BY') outvlist(`outvlist') tvlist(`tvlist') ///
-						lrvlist(`lrvlist') coldnames(`coldnames') strata(`strata') `show' `prefix'
+						lrvlist(`lrvlist') coldnames(`coldnames') strata(`strata') `show'
 
 					if _rc {
 						if `"`err'"'==`""' {
@@ -1159,15 +1167,15 @@ program define ipdmetan, rclass
 		* Append files to form a single "extra" file
 		qui use `extra1_1', clear
 		if `overlen' > 1 {								// if "over", append files
-			qui gen int `prefix'_OVER = 1
+			qui gen int _OVER = 1
 			forvalues h = 2 / `overlen' {
 				local prevoverh : word `=`h'-1' of `studylist'
 				local overh : word `h' of `studylist'
 				rename `prevoverh' `overh'				// rename study var to match with next dataset
 				qui append using `extra1_`h''
-				qui replace `prefix'_OVER = `h' if missing(`prefix'_OVER)
+				qui replace _OVER = `h' if missing(_OVER)
 			}
-			local _OVER `prefix'_OVER
+			local _OVER _OVER
 			// N.B. although `_OVER' implies `ipdover', the converse is not true, as `overlen' might be 1.			
 		}		
 		if `"`extra1_by'"' != `""' {					// if file exists
@@ -1179,11 +1187,11 @@ program define ipdmetan, rclass
 
 		* Apply variable labels to "collapse" vars
 		forvalues i=1/`nc' {
-			label var `: word `i' of `namesc'' `"`nclab`i''"'
+			label variable `: word `i' of `namesc'' `"`nclab`i''"'
 		}
 		if `"`svars'"'!=`""' {			// ...and "string" collapse vars
 			forvalues i=1/`ncs' {
-				label var `: word `i' of `svars'' `"`ncslab`i''"'
+				label variable `: word `i' of `svars'' `"`ncslab`i''"'
 			}
 		}
 		
@@ -1194,20 +1202,25 @@ program define ipdmetan, rclass
 			rename `overh' `_STUDY'		// if "`ipdover'"=="", now named _STUDY
 		}
 
-		if `"`_BY'"'!=`"`prefix'_BY"' & `"`_BY'"'!=`""' {
-			rename `_BY' `prefix'_BY			// avoid using "capture" in case of genuine error
-			local _BY `prefix'_BY
+		if `"`_BY'"'!=`"_BY"' & `"`_BY'"'!=`""' {
+			rename `_BY' `prefixopt'_BY			// avoid using "capture" in case of genuine error
+			local _BY `prefixopt'_BY
 		}
 		
 		if `"`cmdstruc'"'==`"generic"' {
 			tempvar merge
 			qui merge 1:1 `_BY' `_OVER' `_STUDY' using `ipdfile', assert(match using) gen(`merge')
-			qui assert inlist(`prefix'_USE, 1, 2) if `merge'==3 & `tempuse'==1
-			qui assert `prefix'_USE==`tempuse' if `merge'==3 & `tempuse'!=1
-			qui assert inlist(`prefix'_USE, 3, 5) if `merge'==2		// N.B. only applies if no cclist (subgroup/overall not applicable for svars alone)
+			qui assert inlist(`prefixopt'_USE, 1, 2) if `merge'==3 & `tempuse'==1
+			qui assert `prefixopt'_USE==`tempuse' if `merge'==3 & `tempuse'!=1
+			qui assert inlist(`prefixopt'_USE, 3, 5) if `merge'==2		// N.B. only applies if no cclist (subgroup/overall not applicable for svars alone)
 			qui drop `tempuse' `merge'
 		}
-		else qui rename `tempuse' `prefix'_USE
+		else qui rename `tempuse' `prefixopt'_USE
+		
+		// April 2022: -collapse- (and keep if _n==_N) retains characteristics such as -stset-
+		// so that the saved dataset will also retain these characteristics, even though they are no longer valid
+		// Hence, remove all characteristics here (none have been set by -ipdmetan- ), using code suggested by Robert Picard
+		clear_char, dataset
 		
 	}	// end if `"`cmdstruc'"'==`"specific"' | trim(`"`cclist'`svars'"') != `""'
 
@@ -1221,11 +1234,11 @@ program define ipdmetan, rclass
 		qui compress `namesr'		// compress first, but then apply formatting if applicable
 		forvalues i=1/`nr' {
 			local temp : word `i' of `namesr'
-			label var `temp' `"`nrlab`i''"'
+			label variable `temp' `"`nrlab`i''"'
 		}
 	}
 	if `"`wgttitle'"'!=`""' label var `wgtvar' `"`wgttitle'"'
-		
+	
 	// apply formats to lcols/rcols
 	if `"`fmts'"'!=`""' {
 		forvalues i=1/`ni' {
@@ -1239,14 +1252,14 @@ program define ipdmetan, rclass
 	
 	// Apply variable and value labels to _BY
 	if `"`_BY'"'!=`""' {
-		confirm numeric var `prefix'_BY
-		label var `prefix'_BY `"`byvarlab'"'
+		confirm numeric var `prefixopt'_BY
+		label variable `prefixopt'_BY `"`byvarlab'"'
 
 		if `"`bylabfile'"'!=`""' {
 			qui do `bylabfile'
-			cap label drop `prefix'_BY
-			label copy `bylab' `prefix'_BY
-			label values `prefix'_BY `prefix'_BY
+			cap label drop `prefixopt'_BY
+			label copy `bylab' `prefixopt'_BY
+			label values `prefixopt'_BY `prefixopt'_BY
 		}
 	}
 	
@@ -1255,7 +1268,7 @@ program define ipdmetan, rclass
 	if `"`cmdstruc'"'==`"specific"' {
 
 		// check sort order
-		sort `prefix'_USE `StudyID'
+		sort `prefixopt'_USE `StudyID'
 	
 		// non-events for 2x2 raw count data
 		// (N.B. `f1' and `f0' have already been declared as part of `outvlist')
@@ -1268,8 +1281,8 @@ program define ipdmetan, rclass
 
 		// _NN for logrank
 		else if "`logrank'"!="" {
-			qui gen long `prefix'_NN = `n0' + `n1'	// total numbers of patients by study
-		}											// N.B. (logrank) HR now implies existence of _NN (if Syntax 2)
+			qui gen long `prefixopt'_NN = `n0' + `n1'	// total numbers of patients by study
+		}												// N.B. (logrank) HR now implies existence of _NN (if Syntax 2)
 	}
 
 	
@@ -1288,18 +1301,19 @@ program define ipdmetan, rclass
 	// Branch by -metan- or -ipdover-
 	if `"`ipdover'"'==`""' {
 	
-		if `"`StudyID'"'!=`"`prefix'_STUDY"' qui drop `StudyID'
-		confirm numeric var `prefix'_STUDY
-		label values `prefix'_STUDY `vallab1'
-		label variable `prefix'_STUDY `"`svarlab'"'
-		format `prefix'_STUDY `studyfmt'				// ADDED DEC 2020
+		if `"`StudyID'"'!=`"_STUDY"' qui drop `StudyID'
+		confirm numeric var _STUDY
+		label values _STUDY `vallab1'
+		label variable _STUDY `"`svarlab'"'
+		format _STUDY `studyfmt'				// ADDED DEC 2020
 		
 		cap nois metan_setup `outvlist', study(`studyopt') by(`byopt') citype(`citype') ///
-			effect(`effect') df(`_df') wgt(`wgtvar') `eform' `log' ///
+			effect(`effect') `prefixopt' `dfopt' `wgtopt' `eform' `log' ///
 			`graph' `overall' `subgroup' `keepall' `keeporder' `het' `interaction' ///
 			forestplot(`opts_fplot') lcols(`lcols') rcols(`rcols') saving(`saving') `ztol' `level' ///
 			cmdstruc(`cmdstruc') summstat(`summstat') ad(`ad') nokeepvars ///
-			estexp(`estexp') explist(`exp_list') extraline(`extraline') lrvlist(`lrvlist') `clear' `clearstack' `opts_ipdm'
+			estexp(`estexp') explist(`exp_list') extraline(`extraline') lrvlist(`lrvlist') ///
+			`clear' `clearstack' `createdby' `opts_ipdm' 
 		
 		if _rc {
 			if `"`err'"'==`""' {
@@ -1323,6 +1337,11 @@ program define ipdmetan, rclass
 		
 		// August 2018:
 		// merge m:1 is done on `touse' and `study' in case more than one study with same name (but assumed only one within `touse'!)
+		
+		// July 2022:
+		// For post-analysis, we need to refer to prefix()
+		// local 0 `", `opts_ipdm'"'
+		// syntax [, PREfix(name local) * ]
 		
 		// Sort out _rsample (already done if "estimation")
 		if `"`cmdstruc'"'==`"specific"' & "`rsample'"=="" {
@@ -1496,9 +1515,12 @@ program define ProcessCommand, sclass
 	local cmdif : copy local if
 	local cmdin : copy local in
 	
-	local NOTALLOWED by bysort mi sw stepwise bayes collect
+	local ALLPREFIX by frame collect statsby rolling bootstrap jackknife permute simulate svy mi bayes bayesmh fmm nestreg stepwise xi fp mfp capture noisily quietly version
+	// ^^ list taken from -help prefix- under Stata v17.0
+	local NOTALLOWED by bysort mi sw stepwise bayes collect fmm sw stepwise xi fp mfp
 	// ^^  this code taken (with modification) from official Stata _prefix_command.ado
-	local YESALLOWED bootstrap jackknife svy mi bayes fmm sw stepwise xi fp mfp capture noisily quietly version
+	// local YESALLOWED bootstrap jackknife svy mi bayes fmm sw stepwise xi fp mfp capture noisily quietly version
+	local YESALLOWED bootstrap jackknife svy mi bayes version
 	// ^^  my own list of "official" (as of Stata 17.0) commands which *are* suitable for combining with -ipdmetan-
 	
 	// parse using colon from left to right
@@ -1508,13 +1530,15 @@ program define ProcessCommand, sclass
 	local pcommand
 	local before before
 	while `"`before'"'!=`""' {
+		
+		local COLON = 1
 		cap _on_colon_parse `command'
 		if _rc {
-			local notprefix = 1
-			continue, break
+			// local notprefix = 1
+			continue, break			
+			//_on_colon_parse : `command'
+			// local COLON = 0
 		}
-
-		// if colon found...
 		local before `"`s(before)'"' 
 		local after  `"`s(after)'"'
 		
@@ -1531,7 +1555,7 @@ program define ProcessCommand, sclass
 			nois disp as err `"{bf:ipdmetan} may not be used in this context"'
 			exit 199
 		}
-		else if !`:list cmd in YESALLOWED' {
+		else if `COLON' & !`:list cmd in YESALLOWED' {
 			// nois disp as err `"{bf:`cmd'} may not be used in this context"'
 			// exit 199
 			local notprefix = 1
@@ -1569,10 +1593,12 @@ program define ProcessCommand, sclass
 		}
 	}
 	
-	if !`notprefix' {
-		nois disp as err `"estimation command could not be identified"'
+	if `notprefix' &  `"`cmd'"'!=`""' & `: list cmd in ALLPREFIX' & !`:list cmd in YESALLOWED' {
+		nois disp as err `"prefix command {bf:`cmd'} not valid with {bf:ipdmetan}"'
 		exit 198
 	}
+	// nois disp as err `"estimation command could not be identified"'
+	// exit 198
 	
 	// Contents of `command' should now be the remaining non-prefix command, which could have:
 	// - a simple syntax [command] [vars], [options]
@@ -1660,6 +1686,7 @@ program define ProcessCommand, sclass
 	* Return relevant parts of command	
 	sreturn clear
 	sreturn local cmdname `cmdname'
+	sreturn local pcommand  `"`pcommand'"'
 	sreturn local cmdbefore `"`pcommand' `cmdname' `cmdargs'"'
 	sreturn local cmdafter  `"`cmdopts' `cmdrest' `glob_opts'"'
 	sreturn local cmdifin   `"`cmdif' `cmdin'"'
@@ -2576,7 +2603,7 @@ program define CommandLoop, rclass sortpreserve
 	local version : di "version " string(_caller()) ":"
 	
 	syntax [anything(name=exp_list equalok)] [if] [in] [fw aw pw iw], IPDFILE(string) CMDNAME(string) STUDY(string) STUDYID(name) ///
-		[CMDBEFORE(string) CMDAFTER(string) noOVERALL noSUBGROUP noTOTAL noRSample ///
+		[PCOMMAND(string) CMDBEFORE(string) CMDAFTER(string) noOVERALL noSUBGROUP noTOTAL noRSample ///
 		BY(string) SORTBY(varname numeric) POOLVAR(string) INTERACTION STATSR(string) NAMESR(string) MESSAGES ///
 		IPDOVER OVERLEN(integer 1) OVERTYPE(string) LEVEL(passthru) ZTOL(real 1.0x-1a) EFORM ADopt PREfix(name local) ]
 	
@@ -2601,7 +2628,10 @@ program define CommandLoop, rclass sortpreserve
 		cap `version' `cmdbefore' if `touse' `cmdafter'
 		local rc = _rc
 		if `rc' {
-			_prefix_run_error `rc' ipdmetan `cmdname'
+			cap nois _prefix_run_error `rc' ipdmetan `cmdname'
+			if `"`pcommand'"'!=`""' local ptext `"(including prefix commands) "'
+			nois disp as err "Try running {help ipdmetan:{it:command}} `ptext'independently of {bf:ipdmetan} to help identify the error"
+			exit `rc'
 		}
 		tempname obs
 		qui gen long `obs'=_n
@@ -2680,15 +2710,22 @@ program define CommandLoop, rclass sortpreserve
 		// 30th Jan 2018
 		// if ipdover, store *values* of beta, sebeta, nbeta and returned numeric status
 		// so that, if rclass, the values are not lost before being posted
-		local beta     `"`s(beta)'"'
-		local beta_val = `beta'
-
-		local sebeta   `"`s(sebeta)'"'
-		local sebeta_val = `sebeta'
-
-		local nbeta    `"`s(nbeta)'"'
-		local nbeta_val = `nbeta'
-
+		// (modified Mar 2022)
+		local beta `"`s(beta)'"'
+		local beta_val = .
+		if `"`beta'"'!=`""' {
+			local beta_val = `beta'
+		}
+		local sebeta `"`s(sebeta)'"'
+		local sebeta_val = .
+		if `"`sebeta'"'!=`""' {
+			local sebeta_val = `sebeta'
+		}
+		local nbeta  `"`s(nbeta)'"'
+		local nbeta_val = .
+		if `"`nbeta'"'!=`""' {
+			local nbeta_val = `nbeta'
+		}
 		forvalues j=1/`nrn' {
 			local us_`j' `"`s(us_`j')'"'
 			local us_`j'_val = `us_`j''
@@ -2704,11 +2741,12 @@ program define CommandLoop, rclass sortpreserve
 		}
 		else gettoken estexp : exp_list, match(par)
 		
-		local nexp : word count `exp_list'
 		tokenize `exp_list'
-		local beta `1'
-		local sebeta `2'
-		local nbeta = cond(`nexp'==3, `"`3'"', ".")		// July 2016: cond(`nexp'==3, `3', .)??  i.e. why use quotes?
+		if `"`4'"'!=`""' {
+			nois disp as err `"Cannot supply more than three expressions to {it:exp_list}"'
+			exit 198
+		}
+		args beta sebeta nbeta
 		
 		// cannot use returned stats if noTOTAL since they cannot be pre-checked with _prefix_expand
 		if `nr' {
@@ -2758,14 +2796,26 @@ program define CommandLoop, rclass sortpreserve
 														// (N.B. `namesrn' will default to float, see help newvarlist)
 	postfile `postname' `postopts' using `ipdfile'
 	
-	
+	// added March 2022
+	local nd = 3
+	if `"`nbeta'"'!=`""' {
+		// local ++nd
+		local nbeta_val_el `"(`nbeta_val')"'
+		local nbeta_el `"(`nbeta')"'
+	}
+	else {
+		return local nonbeta nonbeta
+		local nbeta_val_el `"(.)"'
+		local nbeta_el `"(.)"'
+	}
+
 	// overall (non-pooled): post values or blanks, as appropriate
 	if `"`overall'"'==`""' {
-	
+		
 		// post "(.) (5)" if overall (will eventually be treated as subgroup if byad, and _USE changed to 3)
-		local postreps : di _dup(3) `" (.)"'
+		local postreps : di _dup(`nd') `" (.)"'
 		if `"`ipdover'"'!=`""' & `"`total'"'==`""' {
-			local postexp `"(.) (5) (`beta_val') (`sebeta_val') (`nbeta_val')"'		// only post non-pooled overall stats if ipdover
+			local postexp `"(.) (5) (`beta_val') (`sebeta_val') `nbeta_el'"'		// only post non-pooled overall stats if ipdover
 			return scalar n = `nbeta'
 		}
 		else local postexp `"(.) (5) `postreps'"'						// total of five expressions
@@ -2852,7 +2902,7 @@ program define CommandLoop, rclass sortpreserve
 					}
 					else cap noisily error _rc
 				}
-				local reps = 3 + `nrn'
+				local reps = `nd' + `nrn'
 				local postrepsn : di _dup(`reps') `" (.)"'			// returned numeric stats
 				local postrepss : di _dup(`nrs') `" ()"'			// returned strings
 				local postcoeffs `"(2) `postrepsn' `postrepss'"'	// N.B. "(2)" is for _USE ==> unsuccessful
@@ -2875,12 +2925,12 @@ program define CommandLoop, rclass sortpreserve
 				}
 				else if missing(`beta'/`sebeta') | (abs(`beta')>=`ztol' & abs(`beta'/`sebeta')<`ztol') {	// improved Mar 2017
 					if `"`messages'"'!=`""' disp `"{error}Coefficent could not be estimated"'
-					local postcoeffs `"(2) (.) (.) (`nbeta')"'
+					local postcoeffs `"(2) (.) (.) `nbeta_el'"'
 				}
 				
 				// desired coefficient was estimated successfully
 				else {
-					local postcoeffs `"(1) (`beta') (`sebeta') (`nbeta')"'
+					local postcoeffs `"(1) (`beta') (`sebeta') `nbeta_el'"'
 					if `"`messages'"'!=`""' disp as res "Done`nocvtext'"
 					if !`eclass' & `"`total'"'!=`""' {
 						// cap mat list e(b)
@@ -2918,9 +2968,11 @@ program define CommandLoop, rclass sortpreserve
 	** If appropriate, generate blank subgroup observations
 	//   and fill in with user-requested statistics (and, if ipdover, non-pooled effect estimates)
 	if `"`by'"'!=`""' & `"`subgroup'"'==`""' {
+		local postreps : di _dup(`nd') `" (.)"'
+		
 		foreach byi of local bylist {
 			local blank=0
-			local postexp `"(.) (3) (.) (.) (.)"'	// missing study; _USE=3; beta; se; npts
+			local postexp `"(.) (3) `postreps'"'	// missing study; _USE=3; beta; se; npts
 			
 			if (`"`ipdover'"'!=`""' | `nr') {
 				if `"`ipdover'"'!=`""' & `"`messages'"'!=`""' {
@@ -2960,14 +3012,14 @@ program define CommandLoop, rclass sortpreserve
 						
 						if `eclass' & (!`: list estvar in colna' | (`"`estvareq'"'!=`""' & !`: list estvareq in coleq')) {
 							if `"`messages'"'!=`""' disp `"{error}Coefficent could not be estimated"'
-							local postexp `"(.) (3) (.) (.) (`nbeta')"'
+							local postexp `"(.) (3) (.) (.) `nbeta_el'"'
 						}
 						else if missing(`beta'/`sebeta') | (abs(`beta')>=`ztol' & abs(`beta'/`sebeta')<`ztol') {	// improved Mar 2017
 							if `"`messages'"'!=`""' disp `"{error}Coefficent could not be estimated"'
-							local postexp `"(.) (3) (.) (.) (`nbeta')"'
+							local postexp `"(.) (3) (.) (.) `nbeta_el'"'
 						}
 						else {
-							local postexp `"(.) (3) (`beta') (`sebeta') (`nbeta')"'
+							local postexp `"(.) (3) (`beta') (`sebeta') `nbeta_el'"'
 							if `"`messages'"'!=`""' disp as res "Done`nocvtext'"
 							if !`eclass' & `"`total'"'!=`""' {
 								// cap mat list e(b)
@@ -3380,7 +3432,11 @@ program define FindEstExp, sclass
 	// Parse <exp_list>
 	local nexp=0
 	local neexp=0
-	_prefix_explist `exp_list', stub(_df_) edefault
+	cap nois _prefix_explist `exp_list', stub(_df_) edefault
+	if _rc==100 {		// DF Sep 2022: additional error message suggested by Ian White (c.f. use with -mi- )
+		nois disp as err `"Please check whether {help ipdmetan:{it:command}} is an estimation command returning {bf:e(b)}; if not, {help ipdmetan:{it:exp_list}} is required"'
+		exit _rc
+	}
 	if `"`exp_list'"'!=`""' {
 		cap assert `s(k_eexp)'==0 & inlist(`s(k_exp)', 2, 3)	// if exp_list supplied, must be 2 or 3 exps, no eexps
 		local nexp = `s(k_exp)'
@@ -3420,7 +3476,8 @@ program define FindEstExp, sclass
 	if !`eclass' {							// not using e(b); i.e. either truly non-eclass *or* `exp_list' was supplied by user
 		local beta `"`s(exp1)'"'
 		local sebeta `"`s(exp2)'"'
-		local nbeta = cond(`nexp'==3, `"`s(exp3)'"', ".")		// July 2016: cond(`nexp'==3, `3', .) ??  i.e. why use quotes?
+		// local nbeta = cond(`nexp'==3, `"`s(exp3)'"', ".")		// July 2016: cond(`nexp'==3, `3', .) ??  i.e. why use quotes?
+		if `nexp'==3 local nbeta `"`s(exp3)'"'	// Mar 2022
 		local estexp `"`s(exp1)'"'			// Oct 2018
 		// if `exp_list' supplied by user, use first element of `exp_list' to display later
 	}
@@ -3548,12 +3605,13 @@ end
 
 program define metan_setup, rclass
 
-	syntax varlist(min=2 max=6 numeric) [if] [in], STUDY(string) [BY(string) ///
+	syntax varlist(min=2 max=6 numeric) [if] [in], STUDY(string) [BY(string) PREfix(name local) ///
 		/// /* options for IPD +/- AD only */
-		CMDSTRUC(string) IPDFILE(string) AD(passthru) PLOTID(string) KEEPAll ///
+		CMDSTRUC(string) IPDFILE(string) AD(passthru) PLOTID(passthru) KEEPAll ///
 		ESTEXP(passthru) EXPLIST(passthru) INTERaction EXTRALINE(passthru) LRVLIST(passthru) ///
 		/// /* options potentially modified by AD */
-		EFORM LOG LOGRank EFFECT(string) SUMMSTAT(string) NPTS(varname) NPTS2 noINTeger noKEEPVars noRSample CLEAR * ]
+		EFORM LOG LOGRank EFFECT(string) SUMMSTAT(string) NPTS(varname) NPTS2 noINTeger noKEEPVars noRSample ///
+		CLEAR CLEARSTACK SAVING(passthru) * ]
 
 	local opts_ipdm `"`macval(options)'"'
 	local invlist `varlist'					// now we are dealing with metan-related stuff, so use `invlist' (i.e. "into metan") ...
@@ -3578,16 +3636,16 @@ program define metan_setup, rclass
 	// then vars will be named _USE, _STUDY with optional _BY, _NN (all numeric)
 	// (Original `study' and `by' are stored in macros of those names, for passing to ProcessAD)
 	if "`cmdstruc'"!="" {
-		local _USE `prefix'_USE
-		local _STUDY `prefix'_STUDY
+		local _USE _USE
+		local _STUDY _STUDY
 
 		local _BY
-		cap confirm numeric var `prefix'_BY
-		if !_rc local _BY `prefix'_BY
+		cap confirm numeric var _BY
+		if !_rc local _BY _BY
 
 		local _NN
 		cap confirm numeric var _NN
-		if !_rc local _NN `prefix'_NN
+		if !_rc local _NN _NN
 		
 		local plot = cond(`"`npts2'"'==`""', `"noplot"', `""')
 		
@@ -3700,6 +3758,13 @@ program define metan_setup, rclass
 				exit _rc
 			}
 		}
+		
+		// April 2022: -collapse- (and keep if _n==_N) retains characteristics such as -stset-
+		// so that the saved dataset will also retain these characteristics, even though they are no longer valid
+		// Hence, remove all characteristics here (none have been set by -ipdmetan- ), using code suggested by Robert Picard
+		// (Note: here, this is regarding the **AD dataset** specifically)
+		clear_char, dataset
+		
 	}		// end if `"`ad'"'!=`""'
 
 	
@@ -3720,9 +3785,11 @@ program define metan_setup, rclass
 		// sort out plotid if byad
 		// (oct 2018: moved from -admetan-)
 		if `"`plotid'"'!=`""' {
+			local 0 `", `plotid'"'
+			syntax [, PLOTID(string)]
 			local 0 `plotid'
 			syntax [name] [, *]
-			if `"`namelist'"'==`"_BYAD"' local plotid `"`_SOURCE', `options'"'
+			if `"`namelist'"'==`"_BYAD"' local plotid `"plotid(`_SOURCE', `options')"'
 		}
 
 		// NOV 2019: Print to screen
@@ -3752,12 +3819,15 @@ program define metan_setup, rclass
 			disp as text "  plus " as res "`dispnpts'" as text " participant`s' with insufficient data"
 		}
 		local header noheader
+		
+		local sourceopt `"source(`_SOURCE')"'
 	}		// end if `"`_SOURCE'"'!=`""' {
 	
 	if `"`_BY'"'!=`""' local byopt `"by(`_BY', m)"'						// August 2018
 	if `"`_NN'"'!=`""' local nptsopt `"npts(`_NN', `plot' `integer')"'	// October 2018
 	// (Note: `_STUDY' is guaranteed to exist, so don't need to worry about it being empty)
 
+	if `"`prefix'"'!=`""' local prefixopt prefix(`prefix')				// Sep 2022
 	
 	// NOV 2019: no need to have both `summstat' and `eform';  -metan- will sort that out
 	if inlist("`summstat'", "or", "hr", "shr", "irr", "rr", "rrr") {
@@ -3770,12 +3840,12 @@ program define metan_setup, rclass
 	// `bymissing' and `smissing' already dealt with;
 	//  ==> assume ALL observations in `touse' are to be used, whether missing or not
 	// hence use missing suboption to study() and by() here
-	cap nois metan `invlist' if `touse', study(`_STUDY', m) `byopt' `nptsopt' ///
-		effect(`effect') `eform' `summstat' `log' `logrank' plotid(`plotid') `rsample' `keepvars' ///
-		`keepall' `interaction' `extraline' `clear' `clearstack' `opts_ipdm' ///
+	cap nois metan `invlist' if `touse', study(`_STUDY', m) `prefixopt' `byopt' `nptsopt' ///
+		effect(`effect') `eform' `summstat' `log' `logrank' `plotid' `rsample' `keepvars' ///
+		`keepall' `interaction' `extraline' `clear' `clearstack' `saving' `opts_ipdm' ///
 		///
 		/// /* undocumented -metan- options, only relevant to -ipdmetan- */
-		use(`_USE') source(`_SOURCE') createdby(ipdmetan) `estexp' `explist' `lrvlist' `preserve' `header'
+		use(`_USE') `sourceopt' /*createdby(ipdmetan)*/ `estexp' `explist' `lrvlist' `preserve' `header'
 	
 	if _rc {
 		if `"`err'"'==`""' {
@@ -3787,9 +3857,14 @@ program define metan_setup, rclass
 	}
 
 	return add
-
+	
 	// drop extra obs from `ADfile' before returning to main ipdmetan.ado
 	// [i.e. end of program if "`cmdstruc'"==""]
+	
+	// July 2022: if saving | clear | clearstack, `_SOURCE' will have been renamed to `prefix'_SOURCE by -metan- 
+	if `"`saving'"'!=`""' | `"`clear'`clearstack'"'!=`""' {
+		if `"`_SOURCE'"'!=`""' local _SOURCE `prefix'_SOURCE
+	}
 	if `"`_SOURCE'"'!=`""' & `"`clear'`clearstack'"'==`""' {
 		qui drop if `_SOURCE'==2
 	}
@@ -3888,14 +3963,12 @@ program define ProcessAD, sclass
 	_parse comma lhs rhs : ad
 	if `"`lhs'"'!=`""' {
 		gettoken adfile lhs : lhs						// obtain `ADfile' as first word of `lhs'
-		if `"`adfile'"'!=`""' {							// check that `ADfile' is valid
-			// my_prefix_savingIPD `adfile'				// Oct 2018: do this using a modified version of built-in _prefix_saving.ado
-			cap confirm file `adfile'					// Jan 2020: changed to simply use "confirm file"
+		if `"`adfile'"'!=`""' {							// check that `ADfile' is valid...
+			cap my_prefix_saving `adfile', exists
 			local rc = _rc
-			if `rc' local lhs `"`adfile' `lhs'"'		// if it isn't, put `lhs' back together again to apply -syntax- later
+			if `rc' local lhs `"`adfile' `lhs'"'		// ...if it isn't, put `lhs' back together again to apply -syntax- later
 		}												// assume AD option (and -syntax-) is to be applied to data currently in memory
 	}
-	
 	
 	* If AD file exists, prepare data and load file
 	if `"`adfile'"'!=`""' & !`rc' {
@@ -4650,20 +4723,34 @@ end
 
 * Modified version of _prefix_saving.ado
 // [IPD version] simply tests whether AD file exists
-// October 2018, for ipdmetan v3.0
+// Previous version October 2018, for ipdmetan v3.0
+// This version June 2022, for metan v4.6 / ipdmetan v4.3
 
 // subroutine of ProcessAD
-
-program define my_prefix_savingIPD
-	 
-	cap nois syntax anything(id="file name" name=fname)
-	if !_rc {
-		local rfname = reverse(`"`fname'"')
-		local ss : subinstr local rfname "atd." ""
-		local rss = reverse(`"`ss'"')
-		confirm file `"`rss'.dta"'
+program define my_prefix_saving, sclass
+	cap nois syntax anything(id="file name" name=fname) [, EXISTS REPLACE * ]
+	local rc = `c(rc)'
+	if !`rc' {
+		opts_exclusive "`exists' `replace'" `""' 184
+		if `"`exists'"'!=`""' {
+			cap confirm file `"`fname'"'
+			if _rc {		// try adding ".dta" suffix
+				confirm file `"`fname'.dta"'
+			}
+		}
+		else if `"`replace'"'==`""' {	// use code from _prefix_saving.ado
+			// confirm new file `"`fname'"'
+			// confirm new file `"`fname'.dta"'
+			local ss : subinstr local fname ".dta" ""
+			confirm new file `"`ss'.dta"'
+		}
 	}
-
+	if `rc' {
+		di as err "invalid saving() option"
+		exit `rc'
+	}
+	sreturn local filename `"`fname'"'
+	sreturn local opts_saving `"`replace' `options'"'
 end
 
 
@@ -4852,6 +4939,26 @@ program define ProcessLabelsIPD, sclass sortpreserve
 end
 
 
+// Code written by Robert Picard
+program define clear_char
+
+    version 9.2
+    syntax [varlist] , [Dataset only]
+    
+    local vlist `varlist'
+    
+    if "`dataset'" != "" {
+        local vlist _dta `vlist'
+        if "`only'" != "" local vlist "_dta"
+    }
+    
+    foreach v in `vlist' {
+        local ilist: char `v'[]
+        foreach i in `ilist' {
+            char `v'[`i']
+        }
+    }
+end
 
 
 
