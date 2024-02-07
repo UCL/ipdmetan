@@ -1,10 +1,10 @@
 {smcl}
-{* *! version 3.2  David Fisher  28jan2019}{...}
-{vieweralsosee "admetani" "help admetani"}{...}
+{* *! version 3.3  David Fisher  25nov2020}{...}
+{vieweralsosee "metan" "help metan"}{...}
+{vieweralsosee "metani" "help metani"}{...}
+{vieweralsosee "forestplot" "help forestplot"}{...}
 {vieweralsosee "ipdmetan" "help ipdmetan"}{...}
 {vieweralsosee "ipdover" "help ipdover"}{...}
-{vieweralsosee "forestplot" "help forestplot"}{...}
-{vieweralsosee "metan" "help metan"}{...}
 {vieweralsosee "metaan" "help metaan"}{...}
 {viewerjumpto "Syntax" "admetan##syntax"}{...}
 {viewerjumpto "Description" "admetan##description"}{...}
@@ -18,6 +18,12 @@
 
 {phang}
 {cmd:admetan} {hline 2} Perform meta-analysis of aggregate (summary) data
+
+{phang}
+{bf:{ul:NOTE:}}{ul: As of November 2020, this command is no longer maintained. Please use the latest version of {bf:{help metan}} instead.}
+
+{phang}
+(The commands {bf:{help ipdmetan}} and {bf:{help ipdover}} continue to be maintained under the package name {bf:ipdmetan}, available from SSC.)
 
 
 {marker syntax}{...}

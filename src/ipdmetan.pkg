@@ -1,0 +1,29 @@
+v 3
+d {bf:ipdmetan: Module for performing two-stage IPD meta-analysis.}
+d
+d A set of routines for conducting two-stage individual participant
+d data meta-analysis, and forest plots for trial subgroup analysis.
+d The two-stage routine, 'ipdmetan', loops over a series of
+d categories, fits the desired model to the data within each, and
+d generates pooled effects, heterogeneity statistics etc, as
+d appropriate; aggregate data may also be included from an external
+d dataset. 'ipdover' allows 'ipdmetan' to be used outside of the
+d meta-analytic context, for example for creating a forest plot of
+d a series of (potentially overlapping) subgroups within a single
+d randomized trial.  This package is dependent upon the 'metan'
+d package; please ensure that the latest version of 'metan' is
+d installed.
+d
+d Requires: Stata version 11
+d
+d Distribution-Date: 20221012 
+d
+d Author: David Fisher, MRC Clinical Trials Unit at UCL
+d Support: email d.fisher@ucl.ac.uk
+
+f ipdmetan.ado
+f ipdmetan.sthlp
+f ipdover.ado
+f ipdover.sthlp
+f metan_hlp_run.ado
+f ipdmetan_example.dta

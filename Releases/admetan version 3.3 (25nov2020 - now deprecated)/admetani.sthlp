@@ -1,10 +1,9 @@
 {smcl}
-{* *! version 3.0  David Fisher  08nov2018}{...}
-{vieweralsosee "admetan" "help admetan"}{...}
+{* *! version 3.3  David Fisher  25nov2020}{...}
+{vieweralsosee "metan" "help metan"}{...}
+{vieweralsosee "forestplot" "help forestplot"}{...}
 {vieweralsosee "ipdmetan" "help ipdmetan"}{...}
 {vieweralsosee "ipdover" "help ipdover"}{...}
-{vieweralsosee "forestplot" "help forestplot"}{...}
-{vieweralsosee "metan" "help metan"}{...}
 {viewerjumpto "Syntax" "admetani##syntax"}{...}
 {viewerjumpto "Description" "admetani##description"}{...}
 {viewerjumpto "Options" "admetani##options"}{...}
@@ -13,6 +12,12 @@
 
 {phang}
 {cmd:admetani} {hline 2} Immediate form of {bf:{help admetan}}
+
+{phang}
+{bf:{ul:NOTE:}}{ul: As of November 2020, this command is no longer maintained. Please use {cmd:metani} from the latest version of {bf:{help metan}} instead.}
+
+{phang}
+(The commands {bf:{help ipdmetan}} and {bf:{help ipdover}} continue to be maintained under the package name {bf:ipdmetan}, available from SSC.)
 
 
 {marker syntax}{...}
